@@ -173,7 +173,13 @@ func (s *temporaryDocumentService) Create(
 	if err != nil {
 		return nil, fmt.Errorf("save attachment: %w", err)
 	}
-	optionsJSON, _ := json.Marshal(options)
+	optionsJSON, err := json.Marshal(options)
+	if err != nil {
+		if delErr := s.fileService.DeleteFile(ctx, resourceRef); delErr != nil {
+			logger.Warnf(ctx, "Failed to clean up attachment file %s: %v", resourceRef, delErr)
+		}
+		return nil, fmt.Errorf("encode attachment processing options: %w", err)
+	}
 	document := &types.TemporaryDocument{
 		TenantID: tenantID, SessionID: sessionID, ResourceRef: resourceRef,
 		FileName: baseName, FileType: ext, MimeType: strings.TrimSpace(mimeType), FileSize: fileSize,
@@ -181,23 +187,39 @@ func (s *temporaryDocumentService) Create(
 		ProcessingOptions: types.JSON(optionsJSON),
 	}
 	if err := s.repo.Create(ctx, document); err != nil {
-		_ = s.fileService.DeleteFile(ctx, resourceRef)
+		if delErr := s.fileService.DeleteFile(ctx, resourceRef); delErr != nil {
+			logger.Warnf(ctx, "Failed to clean up attachment file %s: %v", resourceRef, delErr)
+		}
 		return nil, fmt.Errorf("create attachment record: %w", err)
 	}
 	if s.resourceCatalog != nil {
 		if err := s.resourceCatalog.Bind(ctx, resourceRef, "temporary_document", document.ID, "source_file"); err != nil {
-			_ = s.repo.DeleteScoped(ctx, tenantID, sessionID, document.ID)
-			_ = s.fileService.DeleteFile(ctx, resourceRef)
+			if delErr := s.repo.DeleteScoped(ctx, tenantID, sessionID, document.ID); delErr != nil {
+				logger.Warnf(ctx, "Failed to clean up attachment record %s: %v", document.ID, delErr)
+			}
+			if delErr := s.fileService.DeleteFile(ctx, resourceRef); delErr != nil {
+				logger.Warnf(ctx, "Failed to clean up attachment file %s: %v", resourceRef, delErr)
+			}
 			return nil, fmt.Errorf("bind attachment resource: %w", err)
 		}
 	}
-	payload, _ := json.Marshal(types.TemporaryDocumentTaskPayload{TenantID: tenantID, DocumentID: document.ID})
-	queue, _ := types.QueueForTaskType(types.TypeTemporaryDocumentProcess)
+	payload, err := json.Marshal(types.TemporaryDocumentTaskPayload{TenantID: tenantID, DocumentID: document.ID})
+	if err != nil {
+		return nil, fmt.Errorf("encode attachment task payload: %w", err)
+	}
+	queue, ok := types.QueueForTaskType(types.TypeTemporaryDocumentProcess)
+	if !ok {
+		return nil, fmt.Errorf("no queue declared for task type %s", types.TypeTemporaryDocumentProcess)
+	}
 	if _, err := s.taskEnqueuer.Enqueue(
 		asynq.NewTask(types.TypeTemporaryDocumentProcess, payload),
 		asynq.Queue(queue), asynq.MaxRetry(2), asynq.Timeout(10*time.Minute),
 	); err != nil {
-		_ = s.repo.MarkFailed(ctx, tenantID, document.ID, "failed to schedule document parsing")
+		if markErr := s.repo.MarkFailed(
+			ctx, tenantID, document.ID, "failed to schedule document parsing",
+		); markErr != nil {
+			logger.Errorf(ctx, "Failed to mark attachment %s as failed: %v", document.ID, markErr)
+		}
 		document.Status = types.TemporaryDocumentStatusFailed
 		document.ErrorMessage = "failed to schedule document parsing"
 		return document, fmt.Errorf("schedule attachment parsing: %w", err)
@@ -266,9 +288,13 @@ func (s *temporaryDocumentService) Delete(ctx context.Context, tenantID uint64, 
 		return err
 	}
 	for _, ref := range temporaryDocumentImageRefs(document.ImageRefs) {
-		_ = s.fileService.DeleteFile(ctx, ref.URL)
+		if err := s.fileService.DeleteFile(ctx, ref.URL); err != nil {
+			logger.Warnf(ctx, "Failed to delete attachment image %s: %v", ref.URL, err)
+		}
 	}
-	_ = s.fileService.DeleteFile(ctx, document.ResourceRef)
+	if err := s.fileService.DeleteFile(ctx, document.ResourceRef); err != nil {
+		logger.Warnf(ctx, "Failed to delete attachment file %s: %v", document.ResourceRef, err)
+	}
 	return s.repo.DeleteScoped(ctx, tenantID, sessionID, documentID)
 }
 
@@ -306,7 +332,9 @@ func (s *temporaryDocumentService) Process(ctx context.Context, task *asynq.Task
 		if len(message) > 2000 {
 			message = message[:2000]
 		}
-		_ = s.repo.MarkFailed(ctx, payload.TenantID, payload.DocumentID, message)
+		if markErr := s.repo.MarkFailed(ctx, payload.TenantID, payload.DocumentID, message); markErr != nil {
+			logger.Errorf(ctx, "Failed to mark attachment %s as failed: %v", payload.DocumentID, markErr)
+		}
 		logger.Errorf(ctx, "temporary document parse failed: document_id=%s err=%v", payload.DocumentID, parseErr)
 		if hasRetryCount && hasMaxRetry {
 			return parseErr
@@ -349,7 +377,11 @@ func (s *temporaryDocumentService) parse(ctx context.Context, document *types.Te
 	}
 	ext := document.FileType
 	var options types.TemporaryDocumentCreateOptions
-	_ = json.Unmarshal(document.ProcessingOptions, &options)
+	if len(document.ProcessingOptions) > 0 {
+		if err := json.Unmarshal(document.ProcessingOptions, &options); err != nil {
+			return "", nil, nil, fmt.Errorf("decode processing options: %w", err)
+		}
+	}
 	if options.ParserEngine == "" || options.ParserEngine == "auto" {
 		if tenant, ok := ctx.Value(types.TenantInfoContextKey).(*types.Tenant); ok && tenant != nil {
 			options.ParserEngine = tenant.ParserEngineConfig.ResolveChatParserEngine(ext)

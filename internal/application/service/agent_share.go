@@ -230,6 +230,9 @@ func (s *agentShareService) ListSharedAgents(ctx context.Context, tenantID uint6
 		}
 		tm, err := s.orgRepo.GetTenantMember(ctx, share.OrganizationID, tenantID)
 		if err != nil {
+			if !errors.Is(err, repository.ErrOrgMemberNotFound) {
+				return nil, fmt.Errorf("resolve org membership for share %s: %w", share.ID, err)
+			}
 			continue
 		}
 		effective := types.MinOrgRole(share.Permission, tm.Role)

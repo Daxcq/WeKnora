@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/application/repository"
@@ -282,6 +283,9 @@ func (s *kbShareService) ListSharedKnowledgeBases(ctx context.Context, tenantID 
 
 		tm, err := s.orgRepo.GetTenantMember(ctx, share.OrganizationID, tenantID)
 		if err != nil {
+			if !errors.Is(err, repository.ErrOrgMemberNotFound) {
+				return nil, fmt.Errorf("resolve org membership for share %s: %w", share.ID, err)
+			}
 			continue
 		}
 
@@ -470,6 +474,11 @@ func (s *kbShareService) CheckTenantKBPermission(ctx context.Context, kbID strin
 	for _, share := range shares {
 		tm, err := s.orgRepo.GetTenantMember(ctx, share.OrganizationID, callerTenantID)
 		if err != nil {
+			// A real lookup failure must not silently downgrade the caller's
+			// permission — only a missing membership means "not shared here".
+			if !errors.Is(err, repository.ErrOrgMemberNotFound) {
+				return "", false, fmt.Errorf("resolve org membership for share %s: %w", share.ID, err)
+			}
 			continue
 		}
 

@@ -69,13 +69,13 @@ func NewAgentEngine(
 	selectedDocs []*SelectedDocumentInfo,
 	sessionID string,
 	systemPromptTemplate string,
-) *AgentEngine {
+) (*AgentEngine, error) {
 	if eventBus == nil {
 		eventBus = event.NewEventBus()
 	}
 	tokenEst, err := agenttoken.NewEstimator()
 	if err != nil {
-		return nil
+		return nil, fmt.Errorf("failed to initialize token estimator: %w", err)
 	}
 	engine := &AgentEngine{
 		config:               config,
@@ -98,7 +98,7 @@ func NewAgentEngine(
 		)
 	}
 
-	return engine
+	return engine, nil
 }
 
 // SetPinnedMentions sets per-turn @mention scope for MCP services and skills.
@@ -139,8 +139,8 @@ func NewAgentEngineWithSkills(
 	sessionID string,
 	systemPromptTemplate string,
 	skillsManager *skills.Manager,
-) *AgentEngine {
-	engine := NewAgentEngine(
+) (*AgentEngine, error) {
+	engine, err := NewAgentEngine(
 		config,
 		chatModel,
 		toolRegistry,
@@ -150,8 +150,11 @@ func NewAgentEngineWithSkills(
 		sessionID,
 		systemPromptTemplate,
 	)
+	if err != nil {
+		return nil, err
+	}
 	engine.skillsManager = skillsManager
-	return engine
+	return engine, nil
 }
 
 // SetAppConfig sets the application config for prompt template resolution.
