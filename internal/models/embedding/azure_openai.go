@@ -1,7 +1,6 @@
 package embedding
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -10,7 +9,6 @@ import (
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/logger"
-	secutils "github.com/Tencent/WeKnora/internal/utils"
 )
 
 // AzureOpenAIEmbedder implements text vectorization using Azure OpenAI API
@@ -82,16 +80,7 @@ func NewAzureOpenAIEmbedder(apiKey, baseURL, modelName string,
 }
 
 func (e *AzureOpenAIEmbedder) Embed(ctx context.Context, text string) ([]float32, error) {
-	for range 3 {
-		embeddings, err := e.BatchEmbed(ctx, []string{text})
-		if err != nil {
-			return nil, err
-		}
-		if len(embeddings) > 0 {
-			return embeddings[0], nil
-		}
-	}
-	return nil, fmt.Errorf("no embedding returned")
+	return embedSingle(ctx, e.BatchEmbed, text)
 }
 
 func (e *AzureOpenAIEmbedder) BatchEmbed(ctx context.Context, texts []string) ([][]float32, error) {
@@ -146,40 +135,15 @@ func (e *AzureOpenAIEmbedder) BatchEmbed(ctx context.Context, texts []string) ([
 }
 
 func (e *AzureOpenAIEmbedder) doRequestWithRetry(ctx context.Context, jsonData []byte) (*http.Response, error) {
-	url := fmt.Sprintf("%s/openai/deployments/%s/embeddings?api-version=%s",
-		e.baseURL, e.modelName, e.apiVersion)
-
-	var resp *http.Response
-	var err error
-
-	for i := 0; i <= e.maxRetries; i++ {
-		if i > 0 {
-			backoffTime := time.Duration(1<<uint(i-1)) * time.Second
-			if backoffTime > 10*time.Second {
-				backoffTime = 10 * time.Second
-			}
-			select {
-			case <-time.After(backoffTime):
-			case <-ctx.Done():
-				return nil, ctx.Err()
-			}
-		}
-
-		req, reqErr := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(jsonData))
-		if reqErr != nil {
-			err = reqErr
-			continue
-		}
-		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("api-key", e.apiKey)
-		secutils.ApplyCustomHeaders(req, e.customHeaders)
-
-		resp, err = e.httpClient.Do(req)
-		if err == nil {
-			return resp, nil
-		}
-	}
-	return nil, err
+	return postEmbeddingRequest(ctx, e.httpClient, embeddingPostRequest{
+		provider: "AzureOpenAIEmbedder",
+		url: fmt.Sprintf("%s/openai/deployments/%s/embeddings?api-version=%s",
+			e.baseURL, e.modelName, e.apiVersion),
+		body:          jsonData,
+		headers:       map[string]string{"api-key": e.apiKey},
+		customHeaders: e.customHeaders,
+		maxRetries:    e.maxRetries,
+	})
 }
 
 func (e *AzureOpenAIEmbedder) supportsDimensionsParam() bool {

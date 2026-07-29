@@ -1,7 +1,6 @@
 package embedding
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -11,7 +10,6 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
-	secutils "github.com/Tencent/WeKnora/internal/utils"
 )
 
 // NvidiaEmbedder implements text vectorization functionality using NVIDIA API
@@ -89,58 +87,18 @@ func NewNvidiaEmbedder(apiKey, baseURL, modelName string,
 
 // Embed converts text to vector
 func (e *NvidiaEmbedder) Embed(ctx context.Context, text string) ([]float32, error) {
-	for range 3 {
-		embeddings, err := e.BatchEmbed(ctx, []string{text})
-		if err != nil {
-			return nil, err
-		}
-		if len(embeddings) > 0 {
-			return embeddings[0], nil
-		}
-	}
-	return nil, fmt.Errorf("no embedding returned")
+	return embedSingle(ctx, e.BatchEmbed, text)
 }
 
 func (e *NvidiaEmbedder) doRequestWithRetry(ctx context.Context, jsonData []byte) (*http.Response, error) {
-	var resp *http.Response
-	var err error
-	url := e.baseURL + "/embeddings"
-
-	for i := 0; i <= e.maxRetries; i++ {
-		if i > 0 {
-			backoffTime := time.Duration(1<<uint(i-1)) * time.Second
-			if backoffTime > 10*time.Second {
-				backoffTime = 10 * time.Second
-			}
-			logger.GetLogger(ctx).
-				Infof("NvidiaEmbedder retrying request (%d/%d), waiting %v", i, e.maxRetries, backoffTime)
-
-			select {
-			case <-time.After(backoffTime):
-			case <-ctx.Done():
-				return nil, ctx.Err()
-			}
-		}
-
-		// Rebuild request each time to ensure Body is valid
-		req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(jsonData))
-		if err != nil {
-			logger.GetLogger(ctx).Errorf("NvidiaEmbedder failed to create request: %v", err)
-			continue
-		}
-		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("Authorization", "Bearer "+e.apiKey)
-		secutils.ApplyCustomHeaders(req, e.customHeaders)
-
-		resp, err = e.httpClient.Do(req)
-		if err == nil {
-			return resp, nil
-		}
-
-		logger.GetLogger(ctx).Errorf("NvidiaEmbedder request failed (attempt %d/%d): %v", i+1, e.maxRetries+1, err)
-	}
-
-	return nil, err
+	return postEmbeddingRequest(ctx, e.httpClient, embeddingPostRequest{
+		provider:      "NvidiaEmbedder",
+		url:           e.baseURL + "/embeddings",
+		body:          jsonData,
+		headers:       map[string]string{"Authorization": "Bearer " + e.apiKey},
+		customHeaders: e.customHeaders,
+		maxRetries:    e.maxRetries,
+	})
 }
 
 func (e *NvidiaEmbedder) BatchEmbed(ctx context.Context, texts []string) ([][]float32, error) {

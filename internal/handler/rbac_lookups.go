@@ -2,6 +2,7 @@ package handler
 
 import (
 	"errors"
+	"fmt"
 
 	apprepo "github.com/Tencent/WeKnora/internal/application/repository"
 	"github.com/Tencent/WeKnora/internal/application/service"
@@ -32,34 +33,7 @@ import (
 // KBCreatorLookup resolves :id -> KnowledgeBase.CreatorID, scoped to
 // the caller's tenant. Used by all per-KB mutating routes.
 func (h *KnowledgeBaseHandler) KBCreatorLookup(c *gin.Context) (string, error) {
-	id := c.Param("id")
-	if id == "" {
-		return "", errors.New("missing :id param for KB creator lookup")
-	}
-	ctx := c.Request.Context()
-	tenantID, ok := types.TenantIDFromContext(ctx)
-	if !ok {
-		// 没有空间上下文意味着 auth 中间件未完成；当作 lookup 失败让上层 503，
-		// 而不是 silently 走 fail-open 给一个不该有的访问。
-		return "", errors.New("workspace context missing")
-	}
-	kb, err := h.service.GetKnowledgeBaseByID(ctx, id)
-	if err != nil {
-		if errors.Is(err, apprepo.ErrKnowledgeBaseNotFound) {
-			return "", middleware.ErrResourceNotFound
-		}
-		return "", err
-	}
-	if kb == nil {
-		return "", middleware.ErrResourceNotFound
-	}
-	// 显式重校验空间：repo.GetKnowledgeBaseByID 不带 tenant 过滤，
-	// 万一未来 :id 被攻击者从他人空间 UUID 试探到，也不会借由
-	// "ownership match" 通过中间件。
-	if kb.TenantID != tenantID {
-		return "", middleware.ErrResourceNotFound
-	}
-	return kb.CreatorID, nil
+	return lookupKBCreatorFromParam(c, h.service, "id", "KB creator lookup")
 }
 
 // KBCreatorLookupFromKbIDParam is the same lookup as KBCreatorLookup
@@ -70,29 +44,7 @@ func (h *KnowledgeBaseHandler) KBCreatorLookup(c *gin.Context) (string, error) {
 // as sensitive as updating the KB itself, so it must follow the same
 // "creator OR Admin+" matrix.
 func (h *KnowledgeBaseHandler) KBCreatorLookupFromKbIDParam(c *gin.Context) (string, error) {
-	id := c.Param("kbId")
-	if id == "" {
-		return "", errors.New("missing :kbId param for KB creator lookup")
-	}
-	ctx := c.Request.Context()
-	tenantID, ok := types.TenantIDFromContext(ctx)
-	if !ok {
-		return "", errors.New("workspace context missing")
-	}
-	kb, err := h.service.GetKnowledgeBaseByID(ctx, id)
-	if err != nil {
-		if errors.Is(err, apprepo.ErrKnowledgeBaseNotFound) {
-			return "", middleware.ErrResourceNotFound
-		}
-		return "", err
-	}
-	if kb == nil {
-		return "", middleware.ErrResourceNotFound
-	}
-	if kb.TenantID != tenantID {
-		return "", middleware.ErrResourceNotFound
-	}
-	return kb.CreatorID, nil
+	return lookupKBCreatorFromParam(c, h.service, "kbId", "KB creator lookup")
 }
 
 // AgentCreatorLookup resolves :id -> CustomAgent.CreatedBy. Built-in
@@ -222,34 +174,33 @@ func (h *ChunkHandler) KBCreatorLookupFromChunkIDParam(c *gin.Context) (string, 
 // repo.GetKnowledgeBaseByID is unscoped, so we explicitly compare
 // against the context tenant.
 func (h *WikiPageHandler) KBCreatorLookupFromKBPath(c *gin.Context) (string, error) {
-	kbID := c.Param("kb_id")
+	return lookupKBCreatorFromParam(c, h.kbService, "kb_id", "wiki owner lookup")
+}
+
+// lookupKBCreatorFromParam reads a KB id from the named URL param and
+// resolves it to KnowledgeBase.CreatorID. purpose names the lookup in the
+// "missing param" error, e.g. "KB creator lookup".
+func lookupKBCreatorFromParam(
+	c *gin.Context,
+	kbService interfaces.KnowledgeBaseService,
+	param string,
+	purpose string,
+) (string, error) {
+	kbID := c.Param(param)
 	if kbID == "" {
-		return "", errors.New("missing :kb_id param for wiki owner lookup")
+		return "", fmt.Errorf("missing :%s param for %s", param, purpose)
 	}
-	ctx := c.Request.Context()
-	tenantID, ok := types.TenantIDFromContext(ctx)
-	if !ok {
-		return "", errors.New("workspace context missing")
-	}
-	kb, err := h.kbService.GetKnowledgeBaseByID(ctx, kbID)
-	if err != nil {
-		if errors.Is(err, apprepo.ErrKnowledgeBaseNotFound) {
-			return "", middleware.ErrResourceNotFound
-		}
-		return "", err
-	}
-	if kb == nil {
-		return "", middleware.ErrResourceNotFound
-	}
-	if kb.TenantID != tenantID {
-		return "", middleware.ErrResourceNotFound
-	}
-	return kb.CreatorID, nil
+	return resolveKBCreatorByKBID(c, kbService, kbID)
 }
 
 // resolveKBCreatorByKBID resolves a KB id to CreatorID, scoped to the
 // caller's tenant. Used by cross-KB handlers whose body carries kb_id
 // instead of a URL param (batch-delete, move, etc.).
+//
+// 显式重校验空间：repo.GetKnowledgeBaseByID 不带 tenant 过滤，万一未来 kb id
+// 被攻击者从他人空间 UUID 试探到，也不会借由 "ownership match" 通过中间件。
+// 没有空间上下文意味着 auth 中间件未完成；当作 lookup 失败让上层 503，
+// 而不是 silently 走 fail-open 给一个不该有的访问。
 func resolveKBCreatorByKBID(
 	c *gin.Context,
 	kbService interfaces.KnowledgeBaseService,
