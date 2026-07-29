@@ -690,82 +690,91 @@ func (h *SystemHandler) isMinioConfigured(c *gin.Context) bool {
 
 // isMinioEnvAvailable checks whether MinIO env vars (MINIO_ENDPOINT etc.) are set.
 func (h *SystemHandler) isMinioEnvAvailable() bool {
-	return os.Getenv("MINIO_ENDPOINT") != "" &&
-		os.Getenv("MINIO_ACCESS_KEY_ID") != "" &&
-		os.Getenv("MINIO_SECRET_ACCESS_KEY") != ""
+	return allEnvSet("MINIO_ENDPOINT", "MINIO_ACCESS_KEY_ID", "MINIO_SECRET_ACCESS_KEY")
+}
+
+// tenantStorageEngineConfig returns the caller tenant's storage engine config
+// carried on the gin context, or nil when no tenant (or no config) is attached.
+func tenantStorageEngineConfig(c *gin.Context) *types.StorageEngineConfig {
+	v, exists := c.Get(types.TenantInfoContextKey.String())
+	if !exists {
+		return nil
+	}
+	tenant, ok := v.(*types.Tenant)
+	if !ok || tenant == nil {
+		return nil
+	}
+	return tenant.StorageEngineConfig
+}
+
+// allNonEmpty reports whether every given credential field is populated.
+func allNonEmpty(values ...string) bool {
+	for _, v := range values {
+		if v == "" {
+			return false
+		}
+	}
+	return true
+}
+
+// allEnvSet reports whether every named env var is set to a non-empty value.
+func allEnvSet(names ...string) bool {
+	for _, name := range names {
+		if os.Getenv(name) == "" {
+			return false
+		}
+	}
+	return true
 }
 
 // isCOSConfigured checks whether COS connection info is available from tenant config.
 func (h *SystemHandler) isCOSConfigured(c *gin.Context) bool {
-	if v, exists := c.Get(types.TenantInfoContextKey.String()); exists {
-		if tenant, ok := v.(*types.Tenant); ok && tenant != nil && tenant.StorageEngineConfig != nil && tenant.StorageEngineConfig.COS != nil {
-			cosConf := tenant.StorageEngineConfig.COS
-			return cosConf.SecretID != "" && cosConf.SecretKey != "" && cosConf.Region != "" && cosConf.BucketName != ""
-		}
+	if cfg := tenantStorageEngineConfig(c); cfg != nil && cfg.COS != nil {
+		return allNonEmpty(cfg.COS.SecretID, cfg.COS.SecretKey, cfg.COS.Region, cfg.COS.BucketName)
 	}
 	return false
 }
 
 // isTOSConfigured checks whether TOS connection info is available from tenant config or env.
 func (h *SystemHandler) isTOSConfigured(c *gin.Context) bool {
-	if v, exists := c.Get(types.TenantInfoContextKey.String()); exists {
-		if tenant, ok := v.(*types.Tenant); ok && tenant != nil && tenant.StorageEngineConfig != nil && tenant.StorageEngineConfig.TOS != nil {
-			tosConf := tenant.StorageEngineConfig.TOS
-			return tosConf.Endpoint != "" && tosConf.Region != "" && tosConf.AccessKey != "" && tosConf.SecretKey != "" && tosConf.BucketName != ""
-		}
+	if cfg := tenantStorageEngineConfig(c); cfg != nil && cfg.TOS != nil {
+		return allNonEmpty(cfg.TOS.Endpoint, cfg.TOS.Region, cfg.TOS.AccessKey, cfg.TOS.SecretKey, cfg.TOS.BucketName)
 	}
 	return h.isTOSEnvAvailable()
 }
 
 // isOSSConfigured checks whether OSS connection info is available from tenant config.
 func (h *SystemHandler) isOSSConfigured(c *gin.Context) bool {
-	if v, exists := c.Get(types.TenantInfoContextKey.String()); exists {
-		if tenant, ok := v.(*types.Tenant); ok && tenant != nil && tenant.StorageEngineConfig != nil && tenant.StorageEngineConfig.OSS != nil {
-			ossConf := tenant.StorageEngineConfig.OSS
-			return ossConf.Endpoint != "" && ossConf.Region != "" && ossConf.AccessKey != "" && ossConf.SecretKey != "" && ossConf.BucketName != ""
-		}
+	if cfg := tenantStorageEngineConfig(c); cfg != nil && cfg.OSS != nil {
+		return allNonEmpty(cfg.OSS.Endpoint, cfg.OSS.Region, cfg.OSS.AccessKey, cfg.OSS.SecretKey, cfg.OSS.BucketName)
 	}
 	return false
 }
 
 // isKS3Configured checks whether KS3 connection info is available from tenant config.
 func (h *SystemHandler) isKS3Configured(c *gin.Context) bool {
-	if v, exists := c.Get(types.TenantInfoContextKey.String()); exists {
-		if tenant, ok := v.(*types.Tenant); ok && tenant != nil && tenant.StorageEngineConfig != nil && tenant.StorageEngineConfig.KS3 != nil {
-			ks3Conf := tenant.StorageEngineConfig.KS3
-			return ks3Conf.Endpoint != "" && ks3Conf.Region != "" && ks3Conf.AccessKey != "" && ks3Conf.SecretKey != "" && ks3Conf.BucketName != ""
-		}
+	if cfg := tenantStorageEngineConfig(c); cfg != nil && cfg.KS3 != nil {
+		return allNonEmpty(cfg.KS3.Endpoint, cfg.KS3.Region, cfg.KS3.AccessKey, cfg.KS3.SecretKey, cfg.KS3.BucketName)
 	}
 	return false
 }
 
 // isOBSConfigured checks whether OBS connection info is available from tenant config or env.
 func (h *SystemHandler) isOBSConfigured(c *gin.Context) bool {
-	if v, exists := c.Get(types.TenantInfoContextKey.String()); exists {
-		if tenant, ok := v.(*types.Tenant); ok && tenant != nil && tenant.StorageEngineConfig != nil && tenant.StorageEngineConfig.OBS != nil {
-			obsConf := tenant.StorageEngineConfig.OBS
-			return obsConf.Endpoint != "" && obsConf.Region != "" && obsConf.AccessKey != "" && obsConf.SecretKey != "" && obsConf.BucketName != ""
-		}
+	if cfg := tenantStorageEngineConfig(c); cfg != nil && cfg.OBS != nil {
+		return allNonEmpty(cfg.OBS.Endpoint, cfg.OBS.Region, cfg.OBS.AccessKey, cfg.OBS.SecretKey, cfg.OBS.BucketName)
 	}
 	return h.isOBSEnvAvailable()
 }
 
 // isTOSEnvAvailable checks whether TOS env vars are set.
 func (h *SystemHandler) isTOSEnvAvailable() bool {
-	return os.Getenv("TOS_ENDPOINT") != "" &&
-		os.Getenv("TOS_REGION") != "" &&
-		os.Getenv("TOS_ACCESS_KEY") != "" &&
-		os.Getenv("TOS_SECRET_KEY") != "" &&
-		os.Getenv("TOS_BUCKET_NAME") != ""
+	return allEnvSet("TOS_ENDPOINT", "TOS_REGION", "TOS_ACCESS_KEY", "TOS_SECRET_KEY", "TOS_BUCKET_NAME")
 }
 
 // isOBSEnvAvailable checks whether OBS env vars are set.
 func (h *SystemHandler) isOBSEnvAvailable() bool {
-	return os.Getenv("OBS_ENDPOINT") != "" &&
-		os.Getenv("OBS_REGION") != "" &&
-		os.Getenv("OBS_ACCESS_KEY") != "" &&
-		os.Getenv("OBS_SECRET_KEY") != "" &&
-		os.Getenv("OBS_BUCKET_NAME") != ""
+	return allEnvSet("OBS_ENDPOINT", "OBS_REGION", "OBS_ACCESS_KEY", "OBS_SECRET_KEY", "OBS_BUCKET_NAME")
 }
 
 // StorageEngineStatusItem describes one storage engine's availability and description.
@@ -984,11 +993,8 @@ func (h *SystemHandler) CheckStorageEngine(c *gin.Context) {
 }
 
 func (h *SystemHandler) isS3Configured(c *gin.Context) bool {
-	if v, exists := c.Get(types.TenantInfoContextKey.String()); exists {
-		if tenant, ok := v.(*types.Tenant); ok && tenant != nil && tenant.StorageEngineConfig != nil && tenant.StorageEngineConfig.S3 != nil {
-			s3Conf := tenant.StorageEngineConfig.S3
-			return s3Conf.Endpoint != "" && s3Conf.Region != "" && s3Conf.AccessKey != "" && s3Conf.SecretKey != "" && s3Conf.BucketName != ""
-		}
+	if cfg := tenantStorageEngineConfig(c); cfg != nil && cfg.S3 != nil {
+		return allNonEmpty(cfg.S3.Endpoint, cfg.S3.Region, cfg.S3.AccessKey, cfg.S3.SecretKey, cfg.S3.BucketName)
 	}
 	return false
 }

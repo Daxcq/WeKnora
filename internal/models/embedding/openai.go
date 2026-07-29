@@ -1,7 +1,6 @@
 package embedding
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -10,7 +9,6 @@ import (
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/logger"
-	secutils "github.com/Tencent/WeKnora/internal/utils"
 )
 
 // OpenAIEmbedder implements text vectorization functionality using OpenAI API
@@ -94,70 +92,18 @@ func (e *OpenAIEmbedder) SetSupportsDimensionOverride(supported bool) {
 
 // Embed converts text to vector
 func (e *OpenAIEmbedder) Embed(ctx context.Context, text string) ([]float32, error) {
-	for range 3 {
-		embeddings, err := e.BatchEmbed(ctx, []string{text})
-		if err != nil {
-			return nil, err
-		}
-		if len(embeddings) > 0 {
-			return embeddings[0], nil
-		}
-	}
-	return nil, fmt.Errorf("no embedding returned")
+	return embedSingle(ctx, e.BatchEmbed, text)
 }
 
 func (e *OpenAIEmbedder) doRequestWithRetry(ctx context.Context, jsonData []byte) (*http.Response, error) {
-	var resp *http.Response
-	var err error
-	url := e.baseURL + "/embeddings"
-
-	for i := 0; i <= e.maxRetries; i++ {
-		if i > 0 {
-			backoffTime := time.Duration(1<<uint(i-1)) * time.Second
-			if backoffTime > 10*time.Second {
-				backoffTime = 10 * time.Second
-			}
-			logger.GetLogger(ctx).
-				Infof("OpenAIEmbedder retrying request (%d/%d), waiting %v", i, e.maxRetries, backoffTime)
-
-			select {
-			case <-time.After(backoffTime):
-			case <-ctx.Done():
-				return nil, ctx.Err()
-			}
-		}
-
-		// Rebuild request each time to ensure Body is valid.
-		// IMPORTANT: declare `req` separately (var) so the assignment to `err`
-		// below uses the outer-scope variable, not a fresh loop-local one.
-		// Previously this read `req, err := http.NewRequestWithContext(...)`,
-		// where `:=` introduced a new `err` shadowing the outer one. The
-		// `resp, err = httpClient.Do(req)` line then wrote to the shadowed
-		// `err` only, so when all retries failed with connection errors the
-		// outer `err` stayed nil. The function returned `(nil, nil)`, and
-		// callers (BatchEmbed line 195) blindly dereferenced `resp.Body` →
-		// SIGSEGV nil-pointer panic that took down the whole process.
-		// Reproduce: stop the embedding upstream (e.g. localhost:3130), make
-		// any RAG query → backend SIGSEGV instead of returning HTTP 500.
-		var req *http.Request
-		req, err = http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(jsonData))
-		if err != nil {
-			logger.GetLogger(ctx).Errorf("OpenAIEmbedder failed to create request: %v", err)
-			continue
-		}
-		req.Header.Set("Content-Type", "application/json")
-		req.Header.Set("Authorization", "Bearer "+e.apiKey)
-		secutils.ApplyCustomHeaders(req, e.customHeaders)
-
-		resp, err = e.httpClient.Do(req)
-		if err == nil {
-			return resp, nil
-		}
-
-		logger.GetLogger(ctx).Errorf("OpenAIEmbedder request failed (attempt %d/%d): %v", i+1, e.maxRetries+1, err)
-	}
-
-	return nil, err
+	return postEmbeddingRequest(ctx, e.httpClient, embeddingPostRequest{
+		provider:      "OpenAIEmbedder",
+		url:           e.baseURL + "/embeddings",
+		body:          jsonData,
+		headers:       map[string]string{"Authorization": "Bearer " + e.apiKey},
+		customHeaders: e.customHeaders,
+		maxRetries:    e.maxRetries,
+	})
 }
 
 func (e *OpenAIEmbedder) BatchEmbed(ctx context.Context, texts []string) ([][]float32, error) {
