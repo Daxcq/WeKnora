@@ -84,6 +84,9 @@ services:
       # gin 信任的代理 CIDR（逗号分隔）；显式设为空字符串则禁用代理信任。
       # 默认信任 loopback + 私网段（容器网络内 nginx 已覆盖）
       # - WEKNORA_TRUSTED_PROXIES=${WEKNORA_TRUSTED_PROXIES:-}
+      # 跨域访问 API 的 Origin 白名单（逗号分隔）。留空 => `*` 且禁用凭证；
+      # 配置白名单后才允许 Allow-Credentials。
+      - WEKNORA_ALLOWED_ORIGINS=${WEKNORA_ALLOWED_ORIGINS:-}
       # 启动时自动执行数据库迁移；设为 false 禁用，默认启用
       - AUTO_MIGRATE=${AUTO_MIGRATE:-true}
       # 本地存储后端生成下载链接用的外部可达 URL（IM 渠道 local 后端必填）
