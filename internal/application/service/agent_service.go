@@ -187,17 +187,20 @@ func (s *agentService) CreateAgentEngine(
 	}
 
 	// 5. Create engine
-	engine := agent.NewAgentEngine(
+	engine, err := agent.NewAgentEngine(
 		config, chatModel, toolRegistry, eventBus,
 		kbInfos, selectedDocs, sessionID,
 		systemPromptTemplate,
 	)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create agent engine: %w", err)
+	}
 	engine.SetAppConfig(s.cfg)
 	pinnedMCP := s.resolvePinnedMCPServiceInfos(ctx, config)
 	s.attachPinnedMCPToolNames(toolRegistry, pinnedMCP)
 	engine.SetPinnedMentions(
 		pinnedMCP,
-		s.resolvePinnedSkillInfos(config),
+		s.resolvePinnedSkillInfos(ctx, config),
 	)
 
 	// Set VLM image describer for MCP tool result image analysis.
@@ -446,6 +449,10 @@ func (s *agentService) registerTools(
 	for _, target := range config.SearchTargets {
 		kb, err := s.knowledgeBaseService.GetKnowledgeBaseByIDOnly(ctx, target.KnowledgeBaseID)
 		if err != nil {
+			// Skipping a target silently narrows the agent's search scope, so
+			// make the reason visible.
+			logger.Warnf(ctx, "Skipping search target %s: failed to load knowledge base: %v",
+				target.KnowledgeBaseID, err)
 			continue
 		}
 		if kb.IsVectorEnabled() || kb.IsKeywordEnabled() {
@@ -946,7 +953,10 @@ func fallbackPinnedMCPInfos(ids []string) []*agent.PinnedMCPServiceInfo {
 	return result
 }
 
-func (s *agentService) resolvePinnedSkillInfos(config *types.AgentConfig) []*agent.PinnedSkillInfo {
+func (s *agentService) resolvePinnedSkillInfos(
+	ctx context.Context,
+	config *types.AgentConfig,
+) []*agent.PinnedSkillInfo {
 	if len(config.PinnedSkillNames) == 0 {
 		return nil
 	}
@@ -954,11 +964,14 @@ func (s *agentService) resolvePinnedSkillInfos(config *types.AgentConfig) []*age
 	descByName := make(map[string]string)
 	if len(config.SkillDirs) > 0 {
 		loader := skills.NewLoader(config.SkillDirs)
-		if metadata, err := loader.DiscoverSkills(); err == nil {
-			for _, meta := range metadata {
-				if meta != nil {
-					descByName[meta.Name] = meta.Description
-				}
+		metadata, err := loader.DiscoverSkills()
+		if err != nil {
+			logger.Warnf(ctx,
+				"Failed to discover skills for @mention descriptions (dirs=%v): %v", config.SkillDirs, err)
+		}
+		for _, meta := range metadata {
+			if meta != nil {
+				descByName[meta.Name] = meta.Description
 			}
 		}
 	}

@@ -158,7 +158,10 @@ func (eb *EventBus) Emit(ctx context.Context, event Event) error {
 						logger.Errorf(ctx, "event handler panic recovered (type=%s): %v", event.Type, r)
 					}
 				}()
-				_ = h(ctx, event)
+				if err := h(ctx, event); err != nil {
+					logger.Errorf(ctx, "event handler failed (type=%s, id=%s): %v",
+						event.Type, event.ID, err)
+				}
 			}()
 		}
 		return nil

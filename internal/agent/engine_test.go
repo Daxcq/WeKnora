@@ -186,7 +186,7 @@ func newTestEngine(t *testing.T, chatModel chat.Chat, opts ...testEngineOption) 
 	for _, opt := range opts {
 		opt(cfg)
 	}
-	engine := NewAgentEngine(
+	engine, err := NewAgentEngine(
 		cfg,
 		chatModel,
 		nil,
@@ -196,7 +196,8 @@ func newTestEngine(t *testing.T, chatModel chat.Chat, opts ...testEngineOption) 
 		"test-session",
 		"",
 	)
-	require.NotNil(t, engine, "NewAgentEngine returned nil (agenttoken.NewEstimator failed?)")
+	require.NoError(t, err, "NewAgentEngine failed")
+	require.NotNil(t, engine)
 	return engine
 }
 

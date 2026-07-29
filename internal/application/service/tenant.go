@@ -64,7 +64,10 @@ func (s *tenantService) CreateTenant(ctx context.Context, tenant *types.Tenant) 
 	if err := s.createDefaultStorageBackend(ctx, tenant); err != nil {
 		// No related rows exist yet, so rolling the tenant back is safe and
 		// avoids leaving a workspace that cannot bind new knowledge bases.
-		_ = s.repo.DeleteTenant(ctx, tenant.ID)
+		if delErr := s.repo.DeleteTenant(ctx, tenant.ID); delErr != nil {
+			logger.Errorf(ctx, "Failed to roll back tenant %d after storage backend creation failed: %v",
+				tenant.ID, delErr)
+		}
 		return nil, err
 	}
 
@@ -93,7 +96,10 @@ func (s *tenantService) createDefaultStorageBackend(ctx context.Context, tenant 
 	}
 	tenant.DefaultStorageBackendID = &backend.ID
 	if err := s.repo.UpdateTenant(ctx, tenant); err != nil {
-		_ = s.storageRepo.Delete(ctx, tenant.ID, backend.ID)
+		if delErr := s.storageRepo.Delete(ctx, tenant.ID, backend.ID); delErr != nil {
+			logger.Errorf(ctx, "Failed to roll back storage backend %s for tenant %d: %v",
+				backend.ID, tenant.ID, delErr)
+		}
 		return err
 	}
 	return nil

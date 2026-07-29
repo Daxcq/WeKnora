@@ -1,10 +1,14 @@
 package skills
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/Tencent/WeKnora/internal/logger"
 )
 
 // Loader handles skill discovery and loading from the filesystem
@@ -34,7 +38,9 @@ func (l *Loader) DiscoverSkills() ([]*SkillMetadata, error) {
 	for _, dir := range l.skillDirs {
 		metadata, err := l.discoverInDirectory(dir)
 		if err != nil {
-			// Log warning but continue with other directories
+			// Keep scanning the remaining directories, but surface the failure so a
+			// misconfigured or unreadable skill directory is diagnosable.
+			logger.Warnf(context.Background(), "skills: failed to discover skills in %s: %v", dir, err)
 			continue
 		}
 		allMetadata = append(allMetadata, metadata...)
@@ -82,11 +88,13 @@ func (l *Loader) discoverInDirectory(dir string) ([]*SkillMetadata, error) {
 		// Read and parse SKILL.md
 		content, err := os.ReadFile(skillFile)
 		if err != nil {
+			logger.Warnf(context.Background(), "skills: failed to read %s: %v", skillFile, err)
 			continue
 		}
 
 		skill, err := ParseSkillFile(string(content))
 		if err != nil {
+			logger.Warnf(context.Background(), "skills: failed to parse %s: %v", skillFile, err)
 			continue
 		}
 
@@ -114,14 +122,19 @@ func (l *Loader) LoadSkillInstructions(skillName string) (*Skill, error) {
 	}
 
 	// Search for the skill in all directories
+	var searchErrs []error
 	for _, dir := range l.skillDirs {
 		skill, err := l.loadSkillFromDirectory(dir, skillName)
 		if err == nil {
 			l.discoveredSkills[skillName] = skill
 			return skill, nil
 		}
+		searchErrs = append(searchErrs, err)
 	}
 
+	if len(searchErrs) > 0 {
+		return nil, fmt.Errorf("skill not found: %s: %w", skillName, errors.Join(searchErrs...))
+	}
 	return nil, fmt.Errorf("skill not found: %s", skillName)
 }
 
@@ -155,11 +168,13 @@ func (l *Loader) loadSkillFromDirectory(dir, skillName string) (*Skill, error) {
 
 		content, err := os.ReadFile(skillFile)
 		if err != nil {
+			logger.Warnf(context.Background(), "skills: failed to read %s: %v", skillFile, err)
 			continue
 		}
 
 		skill, err := ParseSkillFile(string(content))
 		if err != nil {
+			logger.Warnf(context.Background(), "skills: failed to parse %s: %v", skillFile, err)
 			continue
 		}
 

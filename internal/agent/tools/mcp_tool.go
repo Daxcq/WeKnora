@@ -523,6 +523,7 @@ func MCPToolNamesByServiceID(registry *ToolRegistry) map[string][]string {
 	for _, name := range registry.ListTools() {
 		tool, err := registry.GetTool(name)
 		if err != nil {
+			logger.GetLogger(context.Background()).Warnf("Failed to read registered tool %q: %v", name, err)
 			continue
 		}
 		mcpTool, ok := tool.(*MCPTool)
@@ -557,11 +558,13 @@ func GetMCPToolsInfo(
 
 		client, err := mcpManager.GetOrCreateClient(ctx, service)
 		if err != nil {
+			logger.GetLogger(ctx).Warnf("Failed to connect MCP service %q: %v", service.Name, err)
 			continue
 		}
 
 		tools, err := client.ListTools(infoCtx)
 		if err != nil {
+			logger.GetLogger(ctx).Warnf("Failed to list tools for MCP service %q: %v", service.Name, err)
 			continue
 		}
 

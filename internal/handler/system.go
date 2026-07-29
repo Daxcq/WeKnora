@@ -1301,18 +1301,21 @@ func (h *SystemHandler) ResolveDocumentReader(ctx context.Context, addr string) 
 	if service.IsWeKnoraCloudDocReaderAddr(addr) {
 		creds := h.tenantSvc.GetWeKnoraCloudCredentials(ctx)
 		if creds == nil {
+			logger.Warnf(ctx, "Cannot resolve cloud document reader %s: no WeKnora Cloud credentials", addr)
 			return nil
 		}
 		reader, err := docparser.NewWeKnoraCloudSignedDocumentReader(creds.AppID, creds.AppSecret)
 		if err != nil {
+			logger.Errorf(ctx, "Failed to create cloud document reader for %s: %v", addr, err)
 			return nil
 		}
 		return reader
 	}
 
 	reader, err := docparser.NewHTTPDocumentReader(addr)
-	if err != nil || reader == nil {
-		return reader
+	if err != nil {
+		logger.Errorf(ctx, "Failed to create HTTP document reader for %s: %v", addr, err)
+		return nil
 	}
 	return reader
 }
