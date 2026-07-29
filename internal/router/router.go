@@ -109,14 +109,7 @@ func NewRouter(params RouterParams) *gin.Engine {
 	}
 
 	// CORS 中间件应放在最前面
-	r.Use(cors.New(cors.Config{
-		AllowOrigins:     []string{"*"},
-		AllowMethods:     []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
-		AllowHeaders:     []string{"Origin", "Content-Type", "Accept", "Authorization", "X-API-Key", "X-Request-ID", "X-Tenant-ID", "X-Embed-Session", "X-External-User-ID", "X-External-User-Token"},
-		ExposeHeaders:    []string{"Content-Length", "Access-Control-Allow-Origin"},
-		AllowCredentials: true,
-		MaxAge:           12 * time.Hour,
-	}))
+	r.Use(cors.New(corsConfig()))
 
 	// 基础中间件（不需要认证）
 	r.Use(middleware.RequestID())
@@ -1466,6 +1459,52 @@ func RegisterIMChannelRoutes(r *gin.RouterGroup, imHandler *handler.IMHandler, g
 		wechatGroup.POST("/qrcode", g.Admin(), imHandler.WeChatGetQRCode)
 		wechatGroup.POST("/qrcode/status", g.Admin(), imHandler.WeChatPollQRCodeStatus)
 	}
+}
+
+// corsConfig builds the global CORS policy.
+//
+// Origins are read from WEKNORA_ALLOWED_ORIGINS (comma-separated). When it is
+// unset the policy stays origin-agnostic (`Access-Control-Allow-Origin: *`),
+// which is what token-in-header clients (Bearer / X-API-Key) need, but
+// credentialed requests are NOT allowed: pairing a wildcard origin with
+// `Allow-Credentials: true` is what turns any website into a cross-origin
+// proxy for a logged-in user's cookies. Credentials are enabled only for an
+// explicit origin allowlist.
+func corsConfig() cors.Config {
+	cfg := cors.Config{
+		AllowMethods: []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
+		AllowHeaders: []string{
+			"Origin", "Content-Type", "Accept", "Authorization",
+			"X-API-Key", "X-Request-ID", "X-Tenant-ID",
+			"X-Embed-Session", "X-External-User-ID", "X-External-User-Token",
+		},
+		ExposeHeaders:    []string{"Content-Length", "Access-Control-Allow-Origin"},
+		AllowCredentials: false,
+		MaxAge:           12 * time.Hour,
+	}
+
+	origins := allowedOrigins()
+	if len(origins) == 0 {
+		cfg.AllowOrigins = []string{"*"}
+		return cfg
+	}
+	cfg.AllowOrigins = origins
+	cfg.AllowCredentials = true
+	return cfg
+}
+
+// allowedOrigins parses WEKNORA_ALLOWED_ORIGINS. A bare "*" is treated as
+// "no allowlist configured" so it cannot be combined with credentials.
+func allowedOrigins() []string {
+	origins := make([]string, 0)
+	for _, o := range strings.Split(os.Getenv("WEKNORA_ALLOWED_ORIGINS"), ",") {
+		o = strings.TrimSpace(o)
+		if o == "" || o == "*" {
+			continue
+		}
+		origins = append(origins, o)
+	}
+	return origins
 }
 
 // trustedProxies returns the proxy CIDRs/IPs whose X-Forwarded-For headers

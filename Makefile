@@ -131,6 +131,7 @@ docker-build-all: docker-build-app docker-build-docreader docker-build-frontend
 # direct path needs its own guard.
 docker-run:
 	@[ -f .env ] || ([ -f .env.example ] && cp .env.example .env || touch .env)
+	@./scripts/gen-secrets.sh .env
 	docker-compose up
 
 # 使用新脚本启动所有服务
@@ -172,6 +173,7 @@ clean-images:
 # Restart Docker container (stop, start)
 docker-restart:
 	@[ -f .env ] || ([ -f .env.example ] && cp .env.example .env || touch .env)
+	@./scripts/gen-secrets.sh .env
 	docker-compose stop -t 60
 	docker-compose up
 

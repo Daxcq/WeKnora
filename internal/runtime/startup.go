@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"slices"
 	"sort"
 	"strings"
 	"sync/atomic"
@@ -139,9 +140,63 @@ func LogStartupEnv(ctx context.Context) {
 			"[startup-env] SYSTEM_AES_KEY is set but %d bytes long; AES-256 requires exactly 32 bytes — encryption is DISABLED",
 			len(k))
 	}
+	warnPlaceholderSecrets(ctx)
 	if strings.EqualFold(strings.TrimSpace(os.Getenv("REDIS_TLS_INSECURE_SKIP_VERIFY")), "true") {
 		logger.Warn(ctx,
 			"[startup-env] REDIS_TLS_INSECURE_SKIP_VERIFY=true — Redis TLS certificate verification is DISABLED; do not use in production")
+	}
+}
+
+// placeholderSecrets maps env vars to values that have been shipped in the
+// repo's .env templates. Those templates are copied verbatim to .env by every
+// bootstrap path, so a template value is effectively a published secret: a
+// known JWT_SECRET allows forging an access token for any user, and a known
+// SYSTEM_AES_KEY allows decrypting stored API keys and provider credentials.
+var placeholderSecrets = map[string][]string{
+	"JWT_SECRET": {
+		"weknora-jwt-secret",
+		"CHANGE-ME-jwt-secret",
+	},
+	"SYSTEM_AES_KEY": {
+		"weknora-system-aes-key-32bytes!!",
+		"CHANGE-ME-32-char-secret-key!!!!",
+	},
+}
+
+// insecureSecretNames returns the env vars whose current value is one of the
+// published placeholders, in the order declared above.
+func insecureSecretNames() []string {
+	var names []string
+	for _, name := range []string{"JWT_SECRET", "SYSTEM_AES_KEY"} {
+		val := strings.TrimSpace(os.Getenv(name))
+		if val == "" {
+			continue
+		}
+		if slices.Contains(placeholderSecrets[name], val) {
+			names = append(names, name)
+		}
+	}
+	return names
+}
+
+// warnPlaceholderSecrets refuses to start when a secret still holds a value
+// published in this repository. Non-release modes only warn so local
+// development keeps working. Set WEKNORA_ALLOW_INSECURE_SECRETS=true to
+// downgrade the failure to a warning.
+func warnPlaceholderSecrets(ctx context.Context) {
+	insecure := insecureSecretNames()
+	for _, name := range insecure {
+		logger.Errorf(ctx,
+			"[startup-env] %s still holds the value shipped in .env.example — it is public, "+
+				"anyone can forge credentials with it. Generate one with `./scripts/gen-secrets.sh .env`",
+			name)
+	}
+
+	allowInsecure := strings.EqualFold(strings.TrimSpace(os.Getenv("WEKNORA_ALLOW_INSECURE_SECRETS")), "true")
+	if len(insecure) > 0 && gin.Mode() == gin.ReleaseMode && !allowInsecure {
+		logger.Fatal(ctx,
+			"[startup-env] refusing to start in release mode with published placeholder secrets "+
+				"(set WEKNORA_ALLOW_INSECURE_SECRETS=true to override)")
 	}
 }
 

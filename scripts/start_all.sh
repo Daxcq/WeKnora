@@ -98,6 +98,11 @@ check_env_file() {
     else
         log_info ".env 文件已存在"
     fi
+
+    # 为本次部署生成随机 JWT_SECRET / SYSTEM_AES_KEY（仅在留空或仍是模板占位值时）
+    if [ -x "$PROJECT_ROOT/scripts/gen-secrets.sh" ]; then
+        "$PROJECT_ROOT/scripts/gen-secrets.sh" "$PROJECT_ROOT/.env"
+    fi
     
     # 检查必要的环境变量是否已设置
     source "$PROJECT_ROOT/.env"
