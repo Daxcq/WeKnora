@@ -53,4 +53,5 @@ if [ -d "$BUILTIN_DIR" ]; then
 fi
 
 # ─── Drop privileges and exec the main process ───
+export HOME=/home/appuser
 exec gosu appuser "$@"
