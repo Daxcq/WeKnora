@@ -74,10 +74,11 @@ attempted external request as an error rather than hiding it.
 use the container path, such as `/weknora/inputs/0`.
 
 Docker-runtime plugins require the app container to have the Docker CLI and a
-read-only bind mount of `/var/run/docker.sock`. The app uses that socket only
-to start and stop the declared plugin image; the plugin container does not
-receive the socket. Access to the Docker socket is equivalent to access to the
-host Docker daemon, so enable this mode only for a trusted WeKnora deployment.
+bind mount of `/var/run/docker.sock`. The app uses that socket only to start
+and stop the declared plugin image; the plugin container does not receive the
+socket. The socket API remains privileged even if the bind mount is marked
+read-only. Access to the Docker socket is equivalent to access to the host
+Docker daemon, so enable this mode only for a trusted WeKnora deployment.
 On Docker Desktop, `permissions.read_paths` must use a host path shared with
 Docker, such as `D:/data/notes`; the same path is passed to the Docker daemon
 for its read-only bind mount.
