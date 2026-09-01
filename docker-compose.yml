@@ -38,6 +38,8 @@ services:
       - data-files:/data/files
       - docreader-tmp:/tmp/docreader:ro
       - ./config/config.yaml:/app/config/config.yaml
+      # External Docker plugins are started through the host Docker daemon.
+      - /var/run/docker.sock:/var/run/docker.sock
       # Optional external plugins.
       - ${WEKNORA_PLUGIN_HOST_DIR:-./plugins}:/plugins:ro
       # Optional: mount custom skills directory (allows adding skills without rebuilding image)

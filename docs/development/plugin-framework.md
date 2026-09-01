@@ -73,6 +73,15 @@ attempted external request as an error rather than hiding it.
 `/weknora/inputs/<index>` in the container. The connector configuration should
 use the container path, such as `/weknora/inputs/0`.
 
+Docker-runtime plugins require the app container to have the Docker CLI and a
+read-only bind mount of `/var/run/docker.sock`. The app uses that socket only
+to start and stop the declared plugin image; the plugin container does not
+receive the socket. Access to the Docker socket is equivalent to access to the
+host Docker daemon, so enable this mode only for a trusted WeKnora deployment.
+On Docker Desktop, `permissions.read_paths` must use a host path shared with
+Docker, such as `D:/data/notes`; the same path is passed to the Docker daemon
+for its read-only bind mount.
+
 ## RPCs
 
 The plugin implements:
@@ -108,7 +117,8 @@ $env:WEKNORA_PLUGIN_DIR = "D:\weknora-plugins"
 For the standard Docker Compose deployment, set
 `WEKNORA_PLUGIN_HOST_DIR` to a host directory containing one child directory
 per plugin. Compose mounts it at `/plugins` and sets `WEKNORA_PLUGIN_DIR` for
-the app automatically. A `process` runtime plugin must include its executable
+the app automatically. The Compose app service also mounts the Docker socket
+and includes the Docker CLI for Docker-runtime plugins. A `process` runtime plugin must include its executable
 in that mounted directory and use a command path inside the container, such
 as `/plugins/local-files/local-files`. This runtime does not provide network or
 filesystem isolation; use the Docker runtime for plugins that declare

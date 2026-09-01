@@ -20,6 +20,19 @@ for dir in "${MOUNT_DIRS[@]}"; do
     fi
 done
 
+# Match the mounted Docker socket's group so appuser can start external
+# Docker-runtime plugins without running the application as root.
+if [ -S /var/run/docker.sock ]; then
+    DOCKER_SOCKET_GID="$(stat -c '%g' /var/run/docker.sock)"
+    if ! getent group "$DOCKER_SOCKET_GID" >/dev/null 2>&1; then
+        groupadd -g "$DOCKER_SOCKET_GID" weknora-docker 2>/dev/null || true
+    fi
+    DOCKER_GROUP="$(getent group "$DOCKER_SOCKET_GID" | cut -d: -f1)"
+    if [ -n "$DOCKER_GROUP" ]; then
+        usermod -aG "$DOCKER_GROUP" appuser
+    fi
+fi
+
 # ─── Merge built-in skills into preloaded ───
 # Built-in skills are backed up at /app/skills/_builtin during image build.
 # After a bind-mount replaces /app/skills/preloaded, copy back any

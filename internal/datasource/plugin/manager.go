@@ -368,7 +368,7 @@ func newDockerCommand(manifest pluginapi.Manifest, pluginDir string) (*exec.Cmd,
 	}
 	args = append(args, "-e", "WEKNORA_PLUGIN_STDIO=1", "-e", "WEKNORA_PLUGIN_ID="+manifest.ID)
 	for i, path := range manifest.Permissions.ReadPaths {
-		if !filepath.IsAbs(path) {
+		if !isHostAbsolutePath(path) {
 			path = filepath.Join(pluginDir, path)
 		}
 		args = append(args, "--mount", fmt.Sprintf("type=bind,src=%s,dst=/weknora/inputs/%d,readonly", path, i))
@@ -379,6 +379,13 @@ func newDockerCommand(manifest pluginapi.Manifest, pluginDir string) (*exec.Cmd,
 	}
 	args = append(args, manifest.Runtime.Args...)
 	return exec.Command("docker", args...), containerName, nil
+}
+
+func isHostAbsolutePath(path string) bool {
+	if filepath.IsAbs(path) {
+		return true
+	}
+	return len(path) >= 3 && ((path[0] >= 'a' && path[0] <= 'z') || (path[0] >= 'A' && path[0] <= 'Z')) && path[1] == ':' && (path[2] == '\\' || path[2] == '/')
 }
 
 type stdioConn struct {

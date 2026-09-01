@@ -34,6 +34,21 @@ func TestNewDockerCommandEnforcesManifestNetworkPolicy(t *testing.T) {
 	}
 }
 
+func TestNewDockerCommandPreservesWindowsHostReadPath(t *testing.T) {
+	cmd, _, err := newDockerCommand(pluginapi.Manifest{
+		ID:          "local-files",
+		Permissions: pluginapi.Permissions{ReadPaths: []string{"D:/notes"}},
+		Runtime:     pluginapi.Runtime{Type: "docker", Image: "example/local-files:dev"},
+	}, "/plugins/local-files")
+	if err != nil {
+		t.Fatal(err)
+	}
+	args := strings.Join(cmd.Args, " ")
+	if !strings.Contains(args, "src=D:/notes") {
+		t.Fatalf("expected Windows host path to remain absolute, got %s", args)
+	}
+}
+
 func TestConfigMetadata(t *testing.T) {
 	fields := configMetadata([]pluginapi.ConfigField{{
 		Name: "settings.root_path", Type: "directory", Required: true,
