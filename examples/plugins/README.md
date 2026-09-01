@@ -1,7 +1,7 @@
 # External plugin examples
 
 These directories are standalone Go modules. They import only the public
-`github.com/Tencent/WeKnora/pkg/pluginapi` package from WeKnora `v0.6.4` and do
+`github.com/Tencent/WeKnora/pkg/pluginapi` package from WeKnora `v0.6.5` and do
 not import `internal/...` packages.
 
 Copy any example directory into a separate Git repository and run:
@@ -15,5 +15,7 @@ Install the manifest as one child directory of `WEKNORA_PLUGIN_DIR`. For a
 Docker runtime, the image must already exist on the Docker host. For a process
 runtime, the executable must be present in the mounted plugin directory.
 
-The SDK is published as `v0.6.4`, so these examples can be built from an
-empty external repository without a local `replace` directive.
+The examples use the `Daxcq/WeKnora` fork as the published source for now:
+the `replace` directive maps the canonical Tencent module path to the fork's
+`v0.6.5` tag. Once the SDK is published to `Tencent/WeKnora`, remove that one
+`replace` line; the plugin source itself does not change.

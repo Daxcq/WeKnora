@@ -28,7 +28,7 @@
         <img src="https://img.shields.io/badge/License-MIT-ffffff?labelColor=d4eaf7&color=2e6cc4" alt="License">
     </a>
     <a href="./CHANGELOG.md">
-        <img alt="版本" src="https://img.shields.io/badge/version-0.6.5-2e6cc4?labelColor=d4eaf7">
+        <img alt="版本" src="https://img.shields.io/badge/version-0.6.6-2e6cc4?labelColor=d4eaf7">
     </a>
 </p>
 
@@ -56,6 +56,7 @@
 
 ## ✨ 最新更新
 
+- **v0.6.6** —— 独立插件示例可以从已发布的 Daxcq fork SDK 独立构建，并包含可复现的模块校验信息。
 - **v0.6.5** —— 网络隔离验证改为使用原始 TCP 探针，能够明确区分出站请求被拦截和 TLS 证书错误。
 - **v0.6.4** —— 扩展插件框架：提供版本化 gRPC SDK、基于描述文件的发现、生命周期与健康检查、网络隔离，以及支持正确增量同步的独立本地文件数据源插件。详见 [`docs/development/plugin-framework.md`](./docs/development/plugin-framework.md)。
 - **v0.6.3** —— 网站嵌入 Widget 与发布集成中心（安全模式 Token 交换 + 限流）；对话体验全面革新（引用浮层、RAG 流水线进度、流式 Markdown）；文档多标签与批量重新解析；Wiki 文件夹与层级导航；RSS 数据源；MCP OAuth2；EPUB / MHTML 解析；Agent 模型就绪校验；模型调试器；会话来源筛选；工作区删除 UI。详见 [`CHANGELOG.md`](./CHANGELOG.md)。

@@ -94,7 +94,7 @@ call embedding models, or write to the knowledge base.
 ## Example
 
 `examples/plugins/local-files` is a standalone module. It uses the published
-WeKnora `v0.6.4` module and has no local `replace` directive. It uses a
+WeKnora `v0.6.5` SDK through the current Daxcq fork replacement. It uses a
 relative `ExternalID`, SHA-256 content hashes, and a cursor containing the
 current file map. A rename is therefore represented as a deletion plus an
 addition. Build its image from the plugin directory and copy the manifest into

@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.6.6] - 2026-09-01
+
+### Build & Documentation
+
+- **BUILD**: Standalone plugin examples now include checksums and a fork replacement for the published `Daxcq/WeKnora v0.6.5` SDK, allowing independent `go test` and Docker builds while the upstream Tencent repository remains unavailable for publishing.
+
 ## [0.6.5] - 2026-09-01
 
 ### Bug Fixes

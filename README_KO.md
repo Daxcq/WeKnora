@@ -28,7 +28,7 @@
         <img src="https://img.shields.io/badge/License-MIT-ffffff?labelColor=d4eaf7&color=2e6cc4" alt="License">
     </a>
     <a href="./CHANGELOG.md">
-        <img alt="버전" src="https://img.shields.io/badge/version-0.6.5-2e6cc4?labelColor=d4eaf7">
+        <img alt="버전" src="https://img.shields.io/badge/version-0.6.6-2e6cc4?labelColor=d4eaf7">
     </a>
 </p>
 
@@ -56,6 +56,7 @@ Feishu, Notion, Yuque 등 외부 플랫폼에서 지식 자동 동기화를 지�
 
 ## ✨ 최신 업데이트
 
+- **v0.6.6** — 독립 플러그인 예제가 공개된 Daxcq fork SDK에서 재현 가능한 체크섬과 함께 독립적으로 빌드됩니다.
 - **v0.6.5** — 네트워크 격리 검증을 원시 TCP 프로브로 변경하여 외부 통신 차단과 TLS 인증서 오류를 명확히 구분합니다.
 - **v0.6.4** — 버전이 지정된 gRPC SDK, 매니페스트 기반 검색, 수명주기 및 상태 확인, 네트워크 격리, 올바른 증분 동기화를 지원하는 독립 로컬 파일 데이터 소스 플러그인을 포함한 확장 플러그인 프레임워크입니다. 자세한 내용은 [`docs/development/plugin-framework.md`](./docs/development/plugin-framework.md)를 참조하세요.
 - **v0.6.3** — 웹사이트 임베드 Widget 및 통합 센터(보안 모드 Token 교환 + 속도 제한); 채팅 경험 전면 개편(인용 팝오버, RAG 파이프라인 진행, 스트리밍 Markdown); 문서 다중 태그 및 일괄 reparse; Wiki 폴더 및 계층 탐색; RSS 데이터 소스; MCP OAuth2; EPUB / MHTML 파싱; Agent 모델 준비 상태 검사; 모델 디버거; 세션 소스 필터; 워크스페이스 삭제 UI. 자세한 내용은 [`CHANGELOG.md`](./CHANGELOG.md).

@@ -28,7 +28,7 @@
         <img src="https://img.shields.io/badge/License-MIT-ffffff?labelColor=d4eaf7&color=2e6cc4" alt="License">
     </a>
     <a href="./CHANGELOG.md">
-        <img alt="バージョン" src="https://img.shields.io/badge/version-0.6.5-2e6cc4?labelColor=d4eaf7">
+        <img alt="バージョン" src="https://img.shields.io/badge/version-0.6.6-2e6cc4?labelColor=d4eaf7">
     </a>
 </p>
 
@@ -56,6 +56,7 @@ Feishu、Notion、Yuqueなどの外部プラットフォームからのナレッ
 
 ## ✨ 最新アップデート
 
+- **v0.6.6** — 独立プラグインのサンプルが、公開された Daxcq fork SDK から再現可能なチェックサム付きで単独ビルドできるようになりました。
 - **v0.6.5** — ネットワーク分離の検証に生の TCP プローブを使用し、外部通信のブロックと TLS 証明書エラーを明確に区別できるように修正しました。
 - **v0.6.4** — バージョン付き gRPC SDK、マニフェストによる検出、ライフサイクルとヘルスチェック、ネットワーク分離、正しい増分同期に対応した独立ローカルファイルデータソースプラグインを含む拡張プラグインフレームワーク。詳しくは [`docs/development/plugin-framework.md`](./docs/development/plugin-framework.md) を参照してください。
 - **v0.6.3** — ウェブサイト埋め込み Widget と統合センター（セキュアモード Token 交換 + レート制限）；チャット体験の全面刷新（引用ポップオーバー、RAG パイプライン進捗、ストリーミング Markdown）；ドキュメント複数タグと一括 reparse；Wiki フォルダーと階層ナビゲーション；RSS データソース；MCP OAuth2；EPUB / MHTML 解析；Agent モデル準備状態チェック；モデルデバッガー；セッションソースフィルター；ワークスペース削除 UI。詳細は [`CHANGELOG.md`](./CHANGELOG.md)。
