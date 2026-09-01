@@ -184,7 +184,9 @@ func NewProcessConnector(ctx context.Context, manifestPath string) (*ProcessConn
 	if err != nil {
 		return nil, err
 	}
-	cmd.Dir = pluginDir
+	if manifest.Runtime.Type == "process" {
+		cmd.Dir = pluginDir
+	}
 	stderr, err := cmd.StderrPipe()
 	if err != nil {
 		return nil, fmt.Errorf("plugin stderr pipe: %w", err)
