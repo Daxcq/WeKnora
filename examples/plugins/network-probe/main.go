@@ -5,10 +5,10 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"log"
-	"net/http"
+	"net"
 	"os"
+	"time"
 
 	"github.com/Tencent/WeKnora/pkg/pluginapi"
 )
@@ -28,17 +28,13 @@ func (networkProbe) ResolveResourceAncestors(context.Context, json.RawMessage, [
 }
 
 func (networkProbe) FetchAll(ctx context.Context, _ json.RawMessage, _ []string) ([]pluginapi.FetchedItem, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, "https://example.com", nil)
-	if err != nil {
-		return nil, err
-	}
-	resp, err := http.DefaultClient.Do(req)
+	dialer := net.Dialer{Timeout: 3 * time.Second}
+	conn, err := dialer.DialContext(ctx, "tcp", "example.com:443")
 	if err == nil {
-		_, _ = io.Copy(io.Discard, resp.Body)
-		_ = resp.Body.Close()
+		_ = conn.Close()
 		return nil, errNetworkAllowed
 	}
-	log.Printf("outbound request blocked as expected: %v", err)
+	log.Printf("outbound TCP connection blocked as expected: %v", err)
 	return nil, fmt.Errorf("network blocked: %w", err)
 }
 
