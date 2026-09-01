@@ -28,7 +28,7 @@
         <img src="https://img.shields.io/badge/License-MIT-ffffff?labelColor=d4eaf7&color=2e6cc4" alt="License">
     </a>
     <a href="./CHANGELOG.md">
-        <img alt="Version" src="https://img.shields.io/badge/version-0.6.4-2e6cc4?labelColor=d4eaf7">
+        <img alt="Version" src="https://img.shields.io/badge/version-0.6.5-2e6cc4?labelColor=d4eaf7">
     </a>
 </p>
 
@@ -57,6 +57,7 @@ The framework supports auto-syncing knowledge from Feishu, Notion, and Yuque (mo
 
 ## ✨ Latest Updates
 
+- **v0.6.5** — Network-isolation verification now uses a raw TCP probe, clearly distinguishing blocked outbound traffic from TLS certificate errors.
 - **v0.6.4** — External plugin framework with versioned gRPC SDK, manifest-based discovery, lifecycle and health management, network isolation, and a standalone local-files data-source plugin with correct incremental synchronization. See [`docs/development/plugin-framework.md`](./docs/development/plugin-framework.md).
 - **v0.6.3** — Website embed widget & Integrations Center (secure-mode token exchange + rate limits); chat experience overhaul (citation popovers, RAG pipeline progress, streaming markdown); document multi-tag & batch reparse; Wiki folders & hierarchy navigation; RSS data source; MCP OAuth2; EPUB / MHTML parsing; agent model-readiness checks; model test debugger; session source filter; workspace deletion UI. See [`CHANGELOG.md`](./CHANGELOG.md).
 - **v0.6.2** — Per-upload process configuration with upload-confirm dialog; document reparse with `process_config`; `weknora` CLI v0.9 (bundled Agent Skills, `session stop`, auth/profile harmonization); KB marquee multi-select; HNSW index for 1024-dim pgvector embeddings; chat resources store refactor; Langfuse-only tracing (Jaeger removed). See [`CHANGELOG.md`](./CHANGELOG.md).

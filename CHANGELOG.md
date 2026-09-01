@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.6.5] - 2026-09-01
+
+### Bug Fixes
+
+- **FIXED**: Network-isolation verification now uses a raw TCP connection instead of HTTPS, so TLS certificate errors cannot be mistaken for a blocked outbound request.
+
 ## [0.6.4] - 2026-09-01
 
 ### New Features
