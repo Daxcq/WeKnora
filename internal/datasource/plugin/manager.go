@@ -214,7 +214,13 @@ func NewProcessConnector(ctx context.Context, manifestPath string) (*ProcessConn
 		transport = &stdioConn{reader: stdout, writer: stdin}
 	}
 
-	dialCtx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	dialTimeout := 10 * time.Second
+	if manifest.Runtime.Type == "docker" {
+		// Docker Desktop may need several seconds to create a container before
+		// its stdio stream is ready, especially while other services start.
+		dialTimeout = 30 * time.Second
+	}
+	dialCtx, cancel := context.WithTimeout(ctx, dialTimeout)
 	defer cancel()
 	var conn *grpc.ClientConn
 	if transport != nil {
