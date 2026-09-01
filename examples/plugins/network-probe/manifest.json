@@ -1,0 +1,11 @@
+{
+  "id": "network-probe",
+  "name": "Network Probe",
+  "version": "0.1.0",
+  "protocol_version": 1,
+  "extension_types": ["datasource"],
+  "weknora_version": ">=0.6.0 <1.0.0",
+  "permissions": {"allow_network": false},
+  "runtime": {"type": "docker", "image": "weknora-plugin-network-probe:dev"},
+  "description": "Fails a sync after proving outbound traffic is blocked."
+}

@@ -2,6 +2,26 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.6.4] - 2026-09-01
+
+### New Features
+
+- **NEW**: **External Plugin Framework** — data-source plugins can now be distributed independently through a versioned gRPC SDK, manifest-based discovery, lifecycle management, health checks, configuration metadata, and permission declarations.
+- **NEW**: **Local Files Data-Source Plugin** — an independently buildable example plugin supports full and incremental directory synchronization, content-hash change detection, and deletion tombstones.
+
+### Improvements
+
+- **IMPROVED**: Built-in and external data-source connectors share one registry, enable/disable flow, metadata endpoint, and runtime status endpoint.
+- **IMPROVED**: Docker Compose can mount external plugins from `./plugins` or a configured host directory.
+
+### Security
+
+- **SECURITY**: External plugins that declare no network access run in an isolated Docker network and receive only their declared read-only data mounts.
+
+### Documentation
+
+- **DOC**: Added the plugin framework design, plugin SDK reference, standalone example plugins, and a minimal plugin development template.
+
 ## [0.6.3] - 2026-06-26
 
 ### New Features

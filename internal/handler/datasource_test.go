@@ -3,10 +3,13 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
+	"github.com/Tencent/WeKnora/internal/datasource"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/gin-gonic/gin"
@@ -16,6 +19,23 @@ type stubDataSourceService struct {
 	interfaces.DataSourceService
 	getSyncLogs   func(ctx context.Context, dsID string, limit int, offset int) ([]*types.SyncLog, error)
 	getDataSource func(ctx context.Context, id string) (*types.DataSource, error)
+}
+
+type handlerTestConnector struct{}
+
+func (handlerTestConnector) Type() string { return "local-files" }
+func (handlerTestConnector) Validate(context.Context, *types.DataSourceConfig) error { return nil }
+func (handlerTestConnector) ListResources(context.Context, *types.DataSourceConfig, string) ([]types.Resource, error) {
+	return nil, nil
+}
+func (handlerTestConnector) ResolveResourceAncestors(context.Context, *types.DataSourceConfig, []string) ([]string, error) {
+	return nil, nil
+}
+func (handlerTestConnector) FetchAll(context.Context, *types.DataSourceConfig, []string) ([]types.FetchedItem, error) {
+	return nil, nil
+}
+func (handlerTestConnector) FetchIncremental(context.Context, *types.DataSourceConfig, *types.SyncCursor) ([]types.FetchedItem, *types.SyncCursor, error) {
+	return nil, nil, nil
 }
 
 func (s *stubDataSourceService) GetSyncLogs(ctx context.Context, dsID string, limit int, offset int) ([]*types.SyncLog, error) {
@@ -83,7 +103,7 @@ func TestDataSource_GetSyncLogs_ValidLimitWithinBounds(t *testing.T) {
 			return &types.KnowledgeBase{ID: "kb1", TenantID: 1}, nil
 		},
 	}
-	h := NewDataSourceHandler(dsSvc, kbSvc)
+	h := NewDataSourceHandler(dsSvc, kbSvc, datasource.NewConnectorRegistry())
 
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/datasource/ds1/logs?limit=50&offset=25", nil)
@@ -116,7 +136,7 @@ func TestDataSource_GetSyncLogs_LimitExceedingMaximum(t *testing.T) {
 			return &types.KnowledgeBase{ID: "kb1", TenantID: 1}, nil
 		},
 	}
-	h := NewDataSourceHandler(dsSvc, kbSvc)
+	h := NewDataSourceHandler(dsSvc, kbSvc, datasource.NewConnectorRegistry())
 
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/datasource/ds1/logs?limit=999", nil)
@@ -156,7 +176,7 @@ func TestDataSource_GetSyncLogs_MissingLimitDefaultsCorrectly(t *testing.T) {
 			return &types.KnowledgeBase{ID: "kb1", TenantID: 1}, nil
 		},
 	}
-	h := NewDataSourceHandler(dsSvc, kbSvc)
+	h := NewDataSourceHandler(dsSvc, kbSvc, datasource.NewConnectorRegistry())
 
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/datasource/ds1/logs", nil)
@@ -189,7 +209,7 @@ func TestDataSource_GetSyncLogs_NonNumericLimitRejected(t *testing.T) {
 			return &types.KnowledgeBase{ID: "kb1", TenantID: 1}, nil
 		},
 	}
-	h := NewDataSourceHandler(dsSvc, kbSvc)
+	h := NewDataSourceHandler(dsSvc, kbSvc, datasource.NewConnectorRegistry())
 
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/datasource/ds1/logs?limit=abc", nil)
@@ -216,7 +236,7 @@ func TestDataSource_GetSyncLogs_ZeroLimitRejected(t *testing.T) {
 			return &types.KnowledgeBase{ID: "kb1", TenantID: 1}, nil
 		},
 	}
-	h := NewDataSourceHandler(dsSvc, kbSvc)
+	h := NewDataSourceHandler(dsSvc, kbSvc, datasource.NewConnectorRegistry())
 
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/datasource/ds1/logs?limit=0", nil)
@@ -243,7 +263,7 @@ func TestDataSource_GetSyncLogs_NegativeLimitRejected(t *testing.T) {
 			return &types.KnowledgeBase{ID: "kb1", TenantID: 1}, nil
 		},
 	}
-	h := NewDataSourceHandler(dsSvc, kbSvc)
+	h := NewDataSourceHandler(dsSvc, kbSvc, datasource.NewConnectorRegistry())
 
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/datasource/ds1/logs?limit=-5", nil)
@@ -252,5 +272,35 @@ func TestDataSource_GetSyncLogs_NegativeLimitRejected(t *testing.T) {
 
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("expected 400 for negative limit, got %d body=%s", w.Code, w.Body.String())
+	}
+}
+
+func TestConnectorStatusEndpoints(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	registry := datasource.NewConnectorRegistry()
+	if err := registry.Register(handlerTestConnector{}); err != nil {
+		t.Fatal(err)
+	}
+	h := NewDataSourceHandler(nil, nil, registry)
+	r := gin.New()
+	r.GET("/types/status", h.GetConnectorStatuses)
+	r.PUT("/types/:type", h.SetConnectorEnabled)
+
+	statusReq := httptest.NewRequest(http.MethodGet, "/types/status", nil)
+	statusRec := httptest.NewRecorder()
+	r.ServeHTTP(statusRec, statusReq)
+	if statusRec.Code != http.StatusOK || !strings.Contains(statusRec.Body.String(), `"local-files"`) {
+		t.Fatalf("unexpected status response: code=%d body=%s", statusRec.Code, statusRec.Body.String())
+	}
+
+	request := httptest.NewRequest(http.MethodPut, "/types/local-files", strings.NewReader(`{"enabled":false}`))
+	request.Header.Set("Content-Type", "application/json")
+	record := httptest.NewRecorder()
+	r.ServeHTTP(record, request)
+	if record.Code != http.StatusOK || !strings.Contains(record.Body.String(), `"enabled":false`) {
+		t.Fatalf("unexpected disable response: code=%d body=%s", record.Code, record.Body.String())
+	}
+	if _, err := registry.Get("local-files"); !errors.Is(err, datasource.ErrConnectorDisabled) {
+		t.Fatalf("expected disabled connector, got %v", err)
 	}
 }

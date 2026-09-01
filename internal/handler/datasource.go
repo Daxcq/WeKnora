@@ -16,16 +16,19 @@ import (
 type DataSourceHandler struct {
 	service   interfaces.DataSourceService
 	kbService interfaces.KnowledgeBaseService
+	registry  *datasource.ConnectorRegistry
 }
 
 // NewDataSourceHandler creates a new data source handler
 func NewDataSourceHandler(
 	service interfaces.DataSourceService,
 	kbService interfaces.KnowledgeBaseService,
+	registry *datasource.ConnectorRegistry,
 ) *DataSourceHandler {
 	return &DataSourceHandler{
 		service:   service,
 		kbService: kbService,
+		registry:  registry,
 	}
 }
 
@@ -607,4 +610,50 @@ func (h *DataSourceHandler) GetSyncLog(c *gin.Context) {
 func (h *DataSourceHandler) GetAvailableConnectors(c *gin.Context) {
 	connectors := datasource.ListAvailableConnectors()
 	c.JSON(http.StatusOK, connectors)
+}
+
+// GetConnectorStatuses godoc
+// @Summary Get connector runtime statuses
+// @Description Returns enabled and health status for all registered connectors
+// @Tags DataSource
+// @Produce json
+// @Success 200 {object} []datasource.ConnectorStatus
+// @Router /datasource/types/status [get]
+func (h *DataSourceHandler) GetConnectorStatuses(c *gin.Context) {
+	c.JSON(http.StatusOK, h.registry.Statuses(c.Request.Context()))
+}
+
+// SetConnectorEnabled godoc
+// @Summary Enable or disable a connector
+// @Description Controls whether new data source requests can use a registered connector
+// @Tags DataSource
+// @Accept json
+// @Produce json
+// @Param type path string true "Connector type"
+// @Param request body dto.ConnectorEnabledRequest true "Enabled state"
+// @Success 200 {object} datasource.ConnectorStatus
+// @Failure 400 {object} map[string]string
+// @Router /datasource/types/{type} [put]
+func (h *DataSourceHandler) SetConnectorEnabled(c *gin.Context) {
+	var req dto.ConnectorEnabledRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "enabled must be a boolean"})
+		return
+	}
+	if req.Enabled == nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "enabled is required"})
+		return
+	}
+	connectorType := c.Param("type")
+	if err := h.registry.SetEnabled(connectorType, *req.Enabled); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
+		return
+	}
+	for _, status := range h.registry.Statuses(c.Request.Context()) {
+		if status.Type == connectorType {
+			c.JSON(http.StatusOK, status)
+			return
+		}
+	}
+	c.JSON(http.StatusNotFound, gin.H{"error": "connector not found"})
 }

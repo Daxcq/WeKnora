@@ -14,6 +14,7 @@ export interface DataSource {
   status: 'active' | 'paused' | 'error'
   conflict_strategy: 'overwrite' | 'skip'
   sync_deletions: boolean
+  deletion_policy: 'retain' | 'delete'
   last_sync_at: string | null
   last_sync_result: any
   error_message: string
@@ -48,6 +49,14 @@ export interface ConnectorMeta {
   priority: number
   auth_type: string
   capabilities: string[]
+  external?: boolean
+  config?: {
+    name: string
+    type: string
+    required?: boolean
+    secret?: boolean
+    description?: string
+  }[]
 }
 
 export interface Resource {

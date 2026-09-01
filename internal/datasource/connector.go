@@ -2,6 +2,8 @@ package datasource
 
 import (
 	"context"
+	"sort"
+	"sync"
 
 	"github.com/Tencent/WeKnora/internal/types"
 )
@@ -53,13 +55,24 @@ type Connector interface {
 
 // ConnectorRegistry manages the registration and lookup of available connectors
 type ConnectorRegistry struct {
+	mu         sync.RWMutex
 	connectors map[string]Connector
+	disabled   map[string]bool
+}
+
+// ConnectorStatus is the runtime state of a registered connector.
+type ConnectorStatus struct {
+	Type    string `json:"type"`
+	Enabled bool   `json:"enabled"`
+	Healthy bool   `json:"healthy"`
+	Error   string `json:"error,omitempty"`
 }
 
 // NewConnectorRegistry creates a new connector registry
 func NewConnectorRegistry() *ConnectorRegistry {
 	return &ConnectorRegistry{
 		connectors: make(map[string]Connector),
+		disabled:   make(map[string]bool),
 	}
 }
 
@@ -71,23 +84,93 @@ func (r *ConnectorRegistry) Register(connector Connector) error {
 	if connector.Type() == "" {
 		return ErrConnectorTypeEmpty
 	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, exists := r.connectors[connector.Type()]; exists {
+		return ErrConnectorDuplicate
+	}
 	r.connectors[connector.Type()] = connector
 	return nil
 }
 
 // Get retrieves a connector by type
 func (r *ConnectorRegistry) Get(connectorType string) (Connector, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 	connector, exists := r.connectors[connectorType]
 	if !exists {
 		return nil, ErrConnectorNotFound
 	}
+	if r.disabled[connectorType] {
+		return nil, ErrConnectorDisabled
+	}
 	return connector, nil
+}
+
+// SetEnabled changes whether a registered connector can receive new requests.
+func (r *ConnectorRegistry) SetEnabled(connectorType string, enabled bool) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if _, exists := r.connectors[connectorType]; !exists {
+		return ErrConnectorNotFound
+	}
+	r.disabled[connectorType] = !enabled
+	return nil
+}
+
+// Health checks a connector through the same registry used for sync requests.
+// In-process connectors are healthy when registered and enabled; external
+// connectors additionally expose their gRPC health RPC.
+func (r *ConnectorRegistry) Health(ctx context.Context, connectorType string) error {
+	r.mu.RLock()
+	connector, exists := r.connectors[connectorType]
+	r.mu.RUnlock()
+	if !exists {
+		return ErrConnectorNotFound
+	}
+	if checker, ok := connector.(interface{ Health(context.Context) error }); ok {
+		return checker.Health(ctx)
+	}
+	return nil
+}
+
+// Statuses returns a deterministic snapshot for all registered connectors.
+// Health is checked even for disabled connectors so an administrator can see
+// whether re-enabling one would succeed.
+func (r *ConnectorRegistry) Statuses(ctx context.Context) []ConnectorStatus {
+	r.mu.RLock()
+	connectors := make(map[string]Connector, len(r.connectors))
+	enabled := make(map[string]bool, len(r.connectors))
+	for connectorType, connector := range r.connectors {
+		connectors[connectorType] = connector
+		enabled[connectorType] = !r.disabled[connectorType]
+	}
+	r.mu.RUnlock()
+
+	statuses := make([]ConnectorStatus, 0, len(connectors))
+	for connectorType, connector := range connectors {
+		status := ConnectorStatus{Type: connectorType, Enabled: enabled[connectorType], Healthy: true}
+		if checker, ok := connector.(interface{ Health(context.Context) error }); ok {
+			if err := checker.Health(ctx); err != nil {
+				status.Healthy = false
+				status.Error = err.Error()
+			}
+		}
+		statuses = append(statuses, status)
+	}
+	sort.Slice(statuses, func(i, j int) bool { return statuses[i].Type < statuses[j].Type })
+	return statuses
 }
 
 // List returns all registered connector types
 func (r *ConnectorRegistry) List() []string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 	types := make([]string, 0, len(r.connectors))
 	for t := range r.connectors {
+		if r.disabled[t] {
+			continue
+		}
 		types = append(types, t)
 	}
 	return types
@@ -95,13 +178,23 @@ func (r *ConnectorRegistry) List() []string {
 
 // ConnectorMetadata provides metadata about available connectors
 type ConnectorMetadata struct {
-	Type         string   `json:"type"`
-	Name         string   `json:"name"`
-	Description  string   `json:"description"`
-	Icon         string   `json:"icon,omitempty"`
-	Priority     int      `json:"priority"`     // Priority order for UI display (lower = higher priority)
-	AuthType     string   `json:"auth_type"`    // "oauth2", "api_key", "token", etc.
-	Capabilities []string `json:"capabilities"` // "incremental", "webhook", "deletion_sync", etc.
+	Type         string                 `json:"type"`
+	Name         string                 `json:"name"`
+	Description  string                 `json:"description"`
+	Icon         string                 `json:"icon,omitempty"`
+	Priority     int                    `json:"priority"`     // Priority order for UI display (lower = higher priority)
+	AuthType     string                 `json:"auth_type"`    // "oauth2", "api_key", "token", etc.
+	Capabilities []string               `json:"capabilities"` // "incremental", "webhook", "deletion_sync", etc.
+	Config       []ConnectorConfigField `json:"config,omitempty"`
+	External     bool                   `json:"external,omitempty"`
+}
+
+type ConnectorConfigField struct {
+	Name        string `json:"name"`
+	Type        string `json:"type"`
+	Required    bool   `json:"required,omitempty"`
+	Secret      bool   `json:"secret,omitempty"`
+	Description string `json:"description,omitempty"`
 }
 
 // GetConnectorMetadata returns metadata for all available connectors

@@ -59,6 +59,7 @@ import (
 	notionConnector "github.com/Tencent/WeKnora/internal/datasource/connector/notion"
 	rssConnector "github.com/Tencent/WeKnora/internal/datasource/connector/rss"
 	yuqueConnector "github.com/Tencent/WeKnora/internal/datasource/connector/yuque"
+	datasourcePlugin "github.com/Tencent/WeKnora/internal/datasource/plugin"
 	"github.com/Tencent/WeKnora/internal/event"
 	"github.com/Tencent/WeKnora/internal/handler"
 	"github.com/Tencent/WeKnora/internal/handler/session"
@@ -1353,9 +1354,9 @@ func registerIMAdapterFactories(imService *imPkg.Service) {
 }
 
 // initConnectorRegistry creates and populates the connector registry with all available connectors.
-// Aggregates registration errors via errors.Join so a misconfigured or duplicated connector fails
-// container initialization loudly instead of silently disabling the feature at runtime.
-func initConnectorRegistry() (*datasource.ConnectorRegistry, error) {
+// Built-in registration errors fail container initialization. External plugin
+// errors are logged and skipped so one broken plugin cannot stop WeKnora.
+func initConnectorRegistry(cfg *config.Config, cleaner interfaces.ResourceCleaner) (*datasource.ConnectorRegistry, error) {
 	registry := datasource.NewConnectorRegistry()
 
 	var errs error
@@ -1370,6 +1371,21 @@ func initConnectorRegistry() (*datasource.ConnectorRegistry, error) {
 	}
 	if err := registry.Register(rssConnector.NewConnector()); err != nil {
 		errs = errors.Join(errs, fmt.Errorf("register rss connector: %w", err))
+	}
+
+	pluginDir := ""
+	if cfg != nil && cfg.Plugins != nil {
+		pluginDir = cfg.Plugins.Directory
+	}
+	if envDir := strings.TrimSpace(os.Getenv("WEKNORA_PLUGIN_DIR")); envDir != "" {
+		pluginDir = envDir
+	}
+	if pluginDir != "" {
+		manager := datasourcePlugin.NewManager()
+		cleaner.RegisterWithName("ExternalDataSourcePlugins", manager.Close)
+		if err := manager.LoadDirectory(context.Background(), registry, pluginDir); err != nil {
+			logger.Warnf(context.Background(), "load external datasource plugins: %v", err)
+		}
 	}
 
 	// Future connectors will be registered here:

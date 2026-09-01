@@ -1,0 +1,11 @@
+{
+  "id": "replace-me",
+  "name": "Replace Me",
+  "version": "0.1.0",
+  "protocol_version": 1,
+  "extension_types": ["datasource"],
+  "weknora_version": ">=0.6.0 <1.0.0",
+  "config": [],
+  "permissions": {"allow_network": false, "read_paths": []},
+  "runtime": {"type": "docker", "image": "replace-me:dev"}
+}

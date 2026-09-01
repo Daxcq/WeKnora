@@ -47,6 +47,10 @@ const (
 	// Conflict resolution strategies
 	ConflictStrategyOverwrite = "overwrite"
 	ConflictStrategySkip      = "skip"
+
+	// Deletion policies for items reported as deleted by a connector.
+	DeletionPolicyRetain = "retain"
+	DeletionPolicyDelete = "delete"
 )
 
 // DataSource represents a configured external data source for synchronization
@@ -84,6 +88,10 @@ type DataSource struct {
 
 	// Whether to sync deletions from source
 	SyncDeletions bool `json:"sync_deletions" gorm:"default:true"`
+
+	// What to do with knowledge when the source reports a deletion.
+	// Empty values are treated as retain for backward compatibility.
+	DeletionPolicy string `json:"deletion_policy" gorm:"type:varchar(32);default:'retain'"`
 
 	// Last successful sync timestamp
 	LastSyncAt *time.Time `json:"last_sync_at"`

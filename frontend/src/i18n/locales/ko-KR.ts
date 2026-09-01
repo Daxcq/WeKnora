@@ -5619,7 +5619,12 @@ export default {
       overwrite: "덮어쓰기",
       skip: "기존 항목 건너뛰기",
     },
-    syncDeletions: "삭제 동기화 (소스에서 삭제 시 지식베이스에서도 삭제)",
+    syncDeletions: "소스 삭제 처리",
+    deletionPolicy: {
+      label: "삭제 정책",
+      retain: "지식 유지",
+      delete: "지식 삭제",
+    },
     createAndSync: "생성 후 즉시 동기화",
     createSuccess: "데이터 소스가 생성되었습니다",
     createAndSyncSuccess: "데이터 소스가 생성되었으며 동기화 작업이 제출되었습니다",

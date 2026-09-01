@@ -11,8 +11,10 @@ import {
   listResources,
   resolveResourceAncestors,
   deleteDataSource,
+  getConnectorTypes,
   putDataSourceCredentials,
   deleteDataSourceCredentials,
+  type ConnectorMeta,
   type DataSource,
   type Resource,
 } from '@/api/datasource'
@@ -179,6 +181,7 @@ const form = ref({
   sync_mode: 'incremental' as 'incremental' | 'full',
   conflict_strategy: 'overwrite' as 'overwrite' | 'skip',
   sync_deletions: true,
+  deletion_policy: 'retain' as 'retain' | 'delete',
 })
 
 // Step 2: Resources
@@ -333,6 +336,9 @@ const schedulePresets = computed(() => [
 // --- Connector definitions ---
 interface ConnectorDef {
   type: string
+  name?: string
+  description?: string
+  dynamic?: boolean
   available: boolean
   docUrl: string
   permissionDocUrl: string
@@ -340,8 +346,10 @@ interface ConnectorDef {
   requiredPermissions: string[]
   fields: {
     key: string
-    labelKey: string
+    labelKey?: string
+    label?: string
     placeholder: string
+    scope?: 'credentials' | 'settings'
     secret?: boolean
     optional?: boolean
     hintKey?: string
@@ -350,7 +358,7 @@ interface ConnectorDef {
   }[]
 }
 
-const connectorDefs = computed<ConnectorDef[]>(() => [
+const builtInConnectorDefs = computed<ConnectorDef[]>(() => [
   {
     type: 'feishu',
     available: true,
@@ -407,8 +415,64 @@ const connectorDefs = computed<ConnectorDef[]>(() => [
   },
 ])
 
+const externalConnectorDefs = ref<ConnectorDef[]>([])
+const connectorDefs = computed(() => [...builtInConnectorDefs.value, ...externalConnectorDefs.value])
+
+async function loadExternalConnectorDefs() {
+  try {
+    const response = await getConnectorTypes()
+    const metadata: ConnectorMeta[] = response?.data || response || []
+    const builtInTypes = new Set(builtInConnectorDefs.value.map(def => def.type))
+    externalConnectorDefs.value = metadata
+      .filter(meta => meta.external && !builtInTypes.has(meta.type))
+      .map(meta => ({
+        type: meta.type,
+        name: meta.name,
+        description: meta.description,
+        dynamic: true,
+        available: true,
+        docUrl: '',
+        permissionDocUrl: '',
+        permissionPageUrl: '',
+        requiredPermissions: [],
+        fields: (meta.config || []).map(field => {
+          const [prefix, ...rest] = field.name.split('.')
+          const scoped = (prefix === 'settings' || prefix === 'credentials') && rest.length > 0
+          return {
+            key: scoped ? rest.join('.') : field.name,
+            label: field.description || field.name,
+            placeholder: field.type === 'directory' ? '/path/to/directory' : '',
+            scope: scoped && prefix === 'settings' ? 'settings' as const : 'credentials' as const,
+            secret: field.secret,
+            optional: !field.required,
+          }
+        }),
+      }))
+  } catch {
+    externalConnectorDefs.value = []
+  }
+}
+
 
 const currentDef = computed(() => connectorDefs.value.find(d => d.type === form.value.type))
+
+function connectorName(def: ConnectorDef): string {
+  return def.name || t(`datasource.connector.${def.type}`)
+}
+
+function connectorDescription(def: ConnectorDef): string {
+  return def.description || t(`datasource.connectorDesc.${def.type}`)
+}
+
+function fieldLabel(field: ConnectorDef['fields'][number]): string {
+  return field.label || (field.labelKey ? t(field.labelKey) : field.key)
+}
+
+function fieldValue(field: ConnectorDef['fields'][number]) {
+  return field.scope === 'settings'
+    ? form.value.config.settings[field.key]
+    : form.value.config.credentials[field.key]
+}
 
 // --- Drawer lifecycle ---
 watch(visible, async (v) => {
@@ -423,6 +487,7 @@ watch(visible, async (v) => {
     }
     return
   }
+  await loadExternalConnectorDefs()
   step.value = isEdit.value ? 1 : 0
   testResult.value = ''
   testErrorMsg.value = ''
@@ -460,6 +525,7 @@ watch(visible, async (v) => {
       sync_mode: props.dataSource.sync_mode,
       conflict_strategy: props.dataSource.conflict_strategy,
       sync_deletions: props.dataSource.sync_deletions,
+      deletion_policy: props.dataSource.deletion_policy || 'retain',
     }
     selectedResourceIds.value = form.value.config?.resource_ids || []
     tempDsId.value = props.dataSource.id
@@ -474,6 +540,7 @@ watch(visible, async (v) => {
       sync_mode: 'incremental',
       conflict_strategy: 'overwrite',
       sync_deletions: true,
+      deletion_policy: 'retain',
     }
   }
 })
@@ -514,7 +581,7 @@ watch(
 function selectType(def: ConnectorDef) {
   if (!def.available) return
   form.value.type = def.type
-  form.value.name = t(`datasource.connector.${def.type}`)
+  form.value.name = connectorName(def)
   form.value.config.credentials = {}
   rssAuthHeaders.value = []
   step.value = 1
@@ -528,8 +595,8 @@ async function testConnection() {
     const fields = currentDef.value?.fields || []
     for (const f of fields) {
       if (f.optional || f.fieldType === 'custom_headers') continue
-      if (!form.value.config.credentials[f.key]) {
-        MessagePlugin.warning(`${t(f.labelKey)} ${t('datasource.isRequired')}`)
+      if (!fieldValue(f)) {
+        MessagePlugin.warning(`${fieldLabel(f)} ${t('datasource.isRequired')}`)
         return
       }
     }
@@ -544,6 +611,22 @@ async function testConnection() {
         ...form.value,
         knowledge_base_id: props.kbId,
       } as any)
+      await validateConnection(tempDsId.value)
+    } else if (currentDef.value?.dynamic) {
+      if (tempDsId.value) {
+        await updateDataSource(tempDsId.value, {
+          ...form.value,
+          knowledge_base_id: props.kbId,
+        } as any)
+      } else {
+        const res = await createDataSource({
+          ...form.value,
+          knowledge_base_id: props.kbId,
+          status: 'paused',
+        } as any)
+        const created = res?.data || res
+        tempDsId.value = created.id
+      }
       await validateConnection(tempDsId.value)
     } else {
       const creds = { ...form.value.config.credentials }
@@ -724,8 +807,8 @@ function validateStep1Fields(): boolean {
   const fields = currentDef.value?.fields || []
   for (const f of fields) {
     if (f.optional || f.fieldType === 'custom_headers') continue
-    if (!form.value.config.credentials[f.key]) {
-      MessagePlugin.warning(`${t(f.labelKey)} ${t('datasource.isRequired')}`)
+    if (!fieldValue(f)) {
+      MessagePlugin.warning(`${fieldLabel(f)} ${t('datasource.isRequired')}`)
       return false
     }
   }
@@ -1027,10 +1110,10 @@ const drawerConfirmText = computed(() => {
         >
           <div class="ds-type-header">
             <DataSourceTypeIcon :type="def.type" :size="20" />
-            <span class="ds-type-name">{{ t(`datasource.connector.${def.type}`) }}</span>
+            <span class="ds-type-name">{{ connectorName(def) }}</span>
             <span v-if="!def.available" class="ds-type-soon">{{ t('datasource.comingSoon') }}</span>
           </div>
-          <div class="ds-type-desc">{{ t(`datasource.connectorDesc.${def.type}`) }}</div>
+          <div class="ds-type-desc">{{ connectorDescription(def) }}</div>
         </button>
       </div>
     </section>
@@ -1207,7 +1290,7 @@ const drawerConfirmText = computed(() => {
           >
             <template v-if="field.fieldType === 'custom_headers'">
               <div class="custom-headers-header">
-                <label class="form-label" style="margin-bottom: 0;">{{ t(field.labelKey) }}</label>
+                <label class="form-label" style="margin-bottom: 0;">{{ fieldLabel(field) }}</label>
                 <t-button variant="text" size="small" theme="primary" @click="addRssAuthHeader">
                   <template #icon><t-icon name="add" /></template>
                   {{ t('model.editor.customHeadersAdd') }}
@@ -1245,10 +1328,26 @@ const drawerConfirmText = computed(() => {
             </template>
             <template v-else>
               <label class="form-label" :class="{ required: !field.optional }">
-                {{ t(field.labelKey) }}
+                {{ fieldLabel(field) }}
               </label>
               <t-textarea
-                v-if="field.multiline"
+                v-if="field.scope === 'settings' && field.multiline"
+                v-model="form.config.settings[field.key]"
+                :placeholder="field.placeholder || t('credential.inputPlaceholder')"
+                :autosize="{ minRows: 2, maxRows: 6 }"
+                autocomplete="off"
+                spellcheck="false"
+              />
+              <t-input
+                v-else-if="field.scope === 'settings'"
+                v-model="form.config.settings[field.key]"
+                :placeholder="field.placeholder || t('credential.inputPlaceholder')"
+                :type="field.secret ? 'password' : 'text'"
+                autocomplete="off"
+                spellcheck="false"
+              />
+              <t-textarea
+                v-else-if="field.multiline"
                 v-model="form.config.credentials[field.key]"
                 :placeholder="field.placeholder || t('credential.inputPlaceholder')"
                 :autosize="{ minRows: 2, maxRows: 6 }"
@@ -1467,6 +1566,31 @@ const drawerConfirmText = computed(() => {
 
         <div class="form-item form-item--flat">
           <t-checkbox v-model="form.sync_deletions">{{ t('datasource.syncDeletions') }}</t-checkbox>
+        </div>
+        <div v-if="form.sync_deletions" class="form-item">
+          <label class="form-label">{{ t('datasource.deletionPolicy.label') }}</label>
+          <div class="option-pills" role="radiogroup">
+            <button
+              type="button"
+              class="option-pill"
+              :class="{ 'is-active': form.deletion_policy === 'retain' }"
+              role="radio"
+              :aria-checked="form.deletion_policy === 'retain'"
+              @click="form.deletion_policy = 'retain'"
+            >
+              {{ t('datasource.deletionPolicy.retain') }}
+            </button>
+            <button
+              type="button"
+              class="option-pill"
+              :class="{ 'is-active': form.deletion_policy === 'delete' }"
+              role="radio"
+              :aria-checked="form.deletion_policy === 'delete'"
+              @click="form.deletion_policy = 'delete'"
+            >
+              {{ t('datasource.deletionPolicy.delete') }}
+            </button>
+          </div>
         </div>
       </section>
     </template>

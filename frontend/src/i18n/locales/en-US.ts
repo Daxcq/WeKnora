@@ -5607,7 +5607,12 @@ export default {
       overwrite: 'Overwrite',
       skip: 'Skip existing',
     },
-    syncDeletions: 'Sync deletions (remove knowledge when deleted at source)',
+    syncDeletions: 'Process source deletions',
+    deletionPolicy: {
+      label: 'Deletion policy',
+      retain: 'Keep knowledge',
+      delete: 'Delete knowledge',
+    },
     createAndSync: 'Create & Sync Now',
     createSuccess: 'Data source created',
     createAndSyncSuccess: 'Data source created and sync task submitted',

@@ -5620,7 +5620,12 @@ export default {
       overwrite: "覆盖更新",
       skip: "跳过已存在",
     },
-    syncDeletions: "同步删除（源端删除时同步删除知识库中的条目）",
+    syncDeletions: "处理源端删除",
+    deletionPolicy: {
+      label: "删除策略",
+      retain: "保留知识",
+      delete: "同步删除",
+    },
     createAndSync: "创建并立即同步",
     createSuccess: "数据源创建成功",
     createAndSyncSuccess: "数据源创建成功，同步任务已提交",

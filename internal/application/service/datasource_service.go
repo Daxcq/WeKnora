@@ -64,6 +64,10 @@ func (s *DataSourceService) CreateDataSource(ctx context.Context, ds *types.Data
 	if ds == nil {
 		return nil, datasource.ErrDataSourceInvalid
 	}
+	normalizeDeletionPolicy(ds)
+	if !validDeletionPolicy(ds.DeletionPolicy) {
+		return nil, fmt.Errorf("invalid deletion_policy %q", ds.DeletionPolicy)
+	}
 
 	// Validate knowledge base exists
 	kb, err := s.kbService.GetKnowledgeBaseByID(ctx, ds.KnowledgeBaseID)
@@ -160,6 +164,13 @@ func (s *DataSourceService) UpdateDataSource(ctx context.Context, ds *types.Data
 	}
 	if ds.TenantID != existing.TenantID {
 		return nil, datasource.ErrDataSourceInvalid
+	}
+	if ds.DeletionPolicy == "" {
+		ds.DeletionPolicy = existing.DeletionPolicy
+	}
+	normalizeDeletionPolicy(ds)
+	if !validDeletionPolicy(ds.DeletionPolicy) {
+		return nil, fmt.Errorf("invalid deletion_policy %q", ds.DeletionPolicy)
 	}
 
 	// Credentials NEVER flow through this endpoint — they live behind the
@@ -648,16 +659,8 @@ func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) e
 	}
 
 	if fetchErr != nil {
-		// Persist connector cursor even when fetch failed so transient outages
-		// (e.g. RSS feed downtime) do not force a full re-ingest on recovery.
-		if nextCursor != nil {
-			if cursorJSON, cerr := nextCursor.ToJSON(); cerr == nil {
-				ds.LastSyncCursor = cursorJSON
-				if uerr := s.dsRepo.UpdateSyncState(ctx, ds); uerr != nil {
-					logger.Warnf(ctx, "failed to persist sync cursor after fetch error: %v", uerr)
-				}
-			}
-		}
+		// Do not advance the cursor after a failed fetch. The next run must retry
+		// every item that was not confirmed as fetched and processed.
 		logger.Errorf(ctx, "fetch operation failed: %v", fetchErr)
 		syncLog.Status = types.SyncLogStatusFailed
 		syncLog.FinishedAt = timePtr(time.Now().UTC())
@@ -707,11 +710,20 @@ func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) e
 
 	for _, item := range items {
 		if item.IsDeleted {
-			if ds.SyncDeletions {
-				// Count only — actual KB deletion is intentionally not performed.
-				// Users manage knowledge removal explicitly via the KB UI to avoid
-				// accidental data loss from connector misdetection or reconfiguration.
+			if !ds.SyncDeletions || ds.DeletionPolicy != types.DeletionPolicyDelete {
+				result.Skipped++
+				continue
+			}
+			deleted, err := s.deleteSyncedKnowledge(ctx, ds, item.ExternalID)
+			if err != nil {
+				result.Failed++
+				result.Errors = append(result.Errors, fmt.Sprintf("%s: %v", item.ExternalID, err))
+				continue
+			}
+			if deleted {
 				result.Deleted++
+			} else {
+				result.Skipped++
 			}
 			continue
 		}
@@ -755,8 +767,9 @@ func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) e
 		return err
 	}
 
-	// Update cursor for next incremental sync
-	if nextCursor != nil {
+	// A failed item must be retried. Advancing here would make the connector
+	// forget it on the next incremental run.
+	if nextCursor != nil && result.Failed == 0 {
 		cursorJSON, _ := nextCursor.ToJSON()
 		ds.LastSyncCursor = cursorJSON
 	}
@@ -764,9 +777,13 @@ func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) e
 	ds.LastSyncAt = timePtr(time.Now().UTC())
 	syncStatus := types.SyncLogStatusSuccess
 	syncErrorMessage := ""
-	if len(fetchWarnings) > 0 {
+	if result.Failed > 0 || len(fetchWarnings) > 0 {
 		syncStatus = types.SyncLogStatusPartial
-		syncErrorMessage = fmt.Sprintf("Some feeds failed: %s", strings.Join(fetchWarnings, "; "))
+		if len(fetchWarnings) > 0 {
+			syncErrorMessage = fmt.Sprintf("Some feeds failed: %s", strings.Join(fetchWarnings, "; "))
+		} else {
+			syncErrorMessage = fmt.Sprintf("%d item(s) failed and will be retried", result.Failed)
+		}
 		for _, w := range fetchWarnings {
 			result.Errors = append(result.Errors, w)
 		}
@@ -778,6 +795,32 @@ func (s *DataSourceService) ProcessSync(ctx context.Context, task *asynq.Task) e
 		payload.DataSourceID, syncLog.ItemsCreated, syncLog.ItemsUpdated, syncLog.ItemsDeleted)
 
 	return nil
+}
+
+func normalizeDeletionPolicy(ds *types.DataSource) {
+	if ds.DeletionPolicy == "" {
+		ds.DeletionPolicy = types.DeletionPolicyRetain
+	}
+}
+
+func validDeletionPolicy(policy string) bool {
+	return policy == types.DeletionPolicyRetain || policy == types.DeletionPolicyDelete
+}
+
+func (s *DataSourceService) deleteSyncedKnowledge(ctx context.Context, ds *types.DataSource, externalID string) (bool, error) {
+	if externalID == "" {
+		return false, nil
+	}
+	existing, err := s.knowledgeService.GetRepository().FindByMetadataKey(
+		ctx, ds.TenantID, ds.KnowledgeBaseID, "external_id", externalID,
+	)
+	if err != nil || existing == nil {
+		return false, err
+	}
+	if existing.GetMetadata()["datasource_id"] != ds.ID {
+		return false, nil
+	}
+	return true, s.knowledgeService.DeleteKnowledge(ctx, existing.ID)
 }
 
 func (s *DataSourceService) updateSyncRunResult(

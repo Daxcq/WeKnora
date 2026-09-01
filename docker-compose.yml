@@ -38,6 +38,8 @@ services:
       - data-files:/data/files
       - docreader-tmp:/tmp/docreader:ro
       - ./config/config.yaml:/app/config/config.yaml
+      # Optional external plugins.
+      - ${WEKNORA_PLUGIN_HOST_DIR:-./plugins}:/plugins:ro
       # Optional: mount custom skills directory (allows adding skills without rebuilding image)
       - ./skills/preloaded:/app/skills/preloaded
       # Optional: declarative built-in models. Copy config/builtin_models.yaml.example
@@ -81,6 +83,7 @@ services:
       - DB_NAME=${DB_NAME:-}
       - TZ=${TZ:-Asia/Shanghai}
       - WEKNORA_LANGUAGE=${WEKNORA_LANGUAGE:-zh-CN}
+      - WEKNORA_PLUGIN_DIR=${WEKNORA_PLUGIN_DIR:-/plugins}
       # ========== Langfuse (optional observability) ==========
       # Enabled automatically when LANGFUSE_PUBLIC_KEY + LANGFUSE_SECRET_KEY are set.
       # See docs/Langfuse集成.md for the full list of tuning knobs.

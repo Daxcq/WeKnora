@@ -1726,6 +1726,8 @@ func RegisterDataSourceRoutes(
 	{
 		// Get available connector types — Viewer+
 		ds.GET("/types", g.Viewer(), handler.GetAvailableConnectors)
+		ds.GET("/types/status", g.Admin(), handler.GetConnectorStatuses)
+		ds.PUT("/types/:type", g.Admin(), handler.SetConnectorEnabled)
 
 		// Validate credentials without persistence (for "Test Connection" button) — Admin+
 		ds.POST("/validate-credentials", g.Admin(), handler.ValidateCredentials)
