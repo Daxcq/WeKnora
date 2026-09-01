@@ -224,7 +224,7 @@ func NewProcessConnector(ctx context.Context, manifestPath string) (*ProcessConn
 	defer cancel()
 	var conn *grpc.ClientConn
 	if transport != nil {
-		conn, err = grpc.DialContext(dialCtx, "stdio", grpc.WithContextDialer(func(context.Context, string) (net.Conn, error) { return transport, nil }), grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithBlock(), grpc.WithDefaultCallOptions(grpc.ForceCodec(pluginapi.JSONCodec{})))
+		conn, err = grpc.DialContext(dialCtx, "passthrough:///weknora-plugin-stdio", grpc.WithContextDialer(func(context.Context, string) (net.Conn, error) { return transport, nil }), grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithBlock(), grpc.WithDefaultCallOptions(grpc.ForceCodec(pluginapi.JSONCodec{})))
 	} else {
 		conn, err = grpc.DialContext(dialCtx, address, grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithBlock(), grpc.WithDefaultCallOptions(grpc.ForceCodec(pluginapi.JSONCodec{})))
 	}
