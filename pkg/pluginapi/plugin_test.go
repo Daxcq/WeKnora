@@ -31,6 +31,16 @@ func TestValidateManifestRequiresRuntime(t *testing.T) {
 	}
 }
 
+func TestValidateManifestRejectsInvalidExtensionTypes(t *testing.T) {
+	base := Manifest{ID: "test", Name: "Test", Version: "1.0.0", ProtocolVersion: ProtocolVersion, WeKnoraVersion: "*", Runtime: Runtime{Type: "docker", Image: "test"}}
+	for _, extensionTypes := range [][]string{{"datasource", ""}, {"datasource", "datasource"}} {
+		base.ExtensionTypes = extensionTypes
+		if err := ValidateManifest(base); err == nil {
+			t.Fatalf("expected invalid extension types to fail: %#v", extensionTypes)
+		}
+	}
+}
+
 type testConnector struct{}
 
 func (testConnector) Validate(context.Context, json.RawMessage) error { return nil }

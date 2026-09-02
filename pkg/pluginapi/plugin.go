@@ -430,6 +430,17 @@ func ValidateManifest(m Manifest) error {
 	if len(m.ExtensionTypes) == 0 {
 		return fmt.Errorf("plugin manifest requires extension_types")
 	}
+	seenTypes := make(map[string]struct{}, len(m.ExtensionTypes))
+	for _, extensionType := range m.ExtensionTypes {
+		extensionType = strings.TrimSpace(extensionType)
+		if extensionType == "" {
+			return fmt.Errorf("plugin manifest contains an empty extension type")
+		}
+		if _, exists := seenTypes[extensionType]; exists {
+			return fmt.Errorf("plugin manifest contains duplicate extension type %q", extensionType)
+		}
+		seenTypes[extensionType] = struct{}{}
+	}
 	if m.Runtime.Type == "" {
 		return fmt.Errorf("plugin manifest requires runtime.type")
 	}
