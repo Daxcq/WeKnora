@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/Tencent/WeKnora/internal/datasource"
+	"github.com/Tencent/WeKnora/internal/infrastructure/docparser"
 	"github.com/Tencent/WeKnora/internal/logger"
 	"github.com/Tencent/WeKnora/internal/types"
 	"github.com/Tencent/WeKnora/pkg/pluginapi"
@@ -29,6 +30,7 @@ import (
 type Manager struct {
 	mu         sync.Mutex
 	connectors []*ProcessConnector
+	parsers    []string
 }
 
 func NewManager() *Manager { return &Manager{} }
@@ -50,24 +52,55 @@ func (m *Manager) LoadDirectory(ctx context.Context, registry *datasource.Connec
 		if err != nil {
 			continue
 		}
-		connector, err := NewProcessConnector(ctx, manifestPath)
+		connector, err := NewProcessPlugin(ctx, manifestPath)
 		if err != nil {
 			errs = append(errs, fmt.Errorf("load plugin %s: %w", entry.Name(), err))
 			continue
 		}
-		if err := registry.Register(connector); err != nil {
+		hasDatasource := contains(connector.manifest.ExtensionTypes, "datasource")
+		hasParser := contains(connector.manifest.ExtensionTypes, "document_parser")
+		if !hasDatasource && !hasParser {
 			_ = connector.Close()
-			errs = append(errs, fmt.Errorf("register plugin %s: %w", entry.Name(), err))
+			errs = append(errs, fmt.Errorf("plugin %s provides no supported extension", entry.Name()))
 			continue
 		}
-		datasource.ConnectorMetadataRegistry[connector.Type()] = datasource.ConnectorMetadata{
-			Type: connector.Type(), Name: connector.manifest.Name, Description: connector.manifest.Description,
-			AuthType: "custom", Capabilities: []string{"incremental"}, Config: configMetadata(connector.manifest.Config), External: true,
+		if hasParser {
+			if err := docparser.RegisterExternalParser(connector.Type(), connector, types.ParserEngineInfo{
+				Name: connector.Type(), Description: connector.manifest.Description,
+				FileTypes: connector.manifest.FileTypes,
+				Available: true,
+			}); err != nil {
+				_ = connector.Close()
+				errs = append(errs, fmt.Errorf("register parser plugin %s: %w", entry.Name(), err))
+				continue
+			}
+		}
+		if hasDatasource {
+			if err := registry.Register(connector); err != nil {
+				if hasParser {
+					docparser.UnregisterExternalParser(connector.Type())
+				}
+				_ = connector.Close()
+				errs = append(errs, fmt.Errorf("register plugin %s: %w", entry.Name(), err))
+				continue
+			}
+			datasource.ConnectorMetadataRegistry[connector.Type()] = datasource.ConnectorMetadata{
+				Type: connector.Type(), Name: connector.manifest.Name, Description: connector.manifest.Description,
+				AuthType: "custom", Capabilities: []string{"incremental"}, Config: configMetadata(connector.manifest.Config), External: true,
+			}
 		}
 		m.mu.Lock()
 		m.connectors = append(m.connectors, connector)
+		if hasParser {
+			m.parsers = append(m.parsers, connector.Type())
+		}
 		m.mu.Unlock()
-		logger.Infof(ctx, "external datasource plugin loaded: id=%s version=%s", connector.manifest.ID, connector.manifest.Version)
+		if hasDatasource {
+			logger.Infof(ctx, "external datasource plugin loaded: id=%s version=%s", connector.manifest.ID, connector.manifest.Version)
+		}
+		if hasParser {
+			logger.Infof(ctx, "external document parser plugin loaded: id=%s version=%s", connector.manifest.ID, connector.manifest.Version)
+		}
 	}
 	return errors.Join(errs...)
 }
@@ -87,6 +120,10 @@ func (m *Manager) Close() error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	var errs []error
+	for _, name := range m.parsers {
+		docparser.UnregisterExternalParser(name)
+	}
+	m.parsers = nil
 	for _, connector := range m.connectors {
 		if err := connector.Close(); err != nil {
 			errs = append(errs, err)
@@ -147,12 +184,24 @@ type ProcessConnector struct {
 var _ datasource.Connector = (*ProcessConnector)(nil)
 
 func NewProcessConnector(ctx context.Context, manifestPath string) (*ProcessConnector, error) {
+	connector, err := NewProcessPlugin(ctx, manifestPath)
+	if err != nil {
+		return nil, err
+	}
+	if !contains(connector.manifest.ExtensionTypes, "datasource") {
+		_ = connector.Close()
+		return nil, fmt.Errorf("plugin %q does not provide datasource extension", connector.manifest.ID)
+	}
+	return connector, nil
+}
+
+func NewProcessPlugin(ctx context.Context, manifestPath string) (*ProcessConnector, error) {
 	manifest, err := readManifest(manifestPath)
 	if err != nil {
 		return nil, err
 	}
-	if !contains(manifest.ExtensionTypes, "datasource") {
-		return nil, fmt.Errorf("plugin %q does not provide datasource extension", manifest.ID)
+	if !contains(manifest.ExtensionTypes, "datasource") && !contains(manifest.ExtensionTypes, "document_parser") {
+		return nil, fmt.Errorf("plugin %q provides no supported extension", manifest.ID)
 	}
 	if manifest.Runtime.Type == "process" && !manifest.Permissions.AllowNetwork {
 		return nil, fmt.Errorf("plugin %q requests network isolation but process runtime cannot enforce it; use docker runtime", manifest.ID)
@@ -266,6 +315,24 @@ func (c *ProcessConnector) Health(ctx context.Context) error {
 		return fmt.Errorf("plugin health status: %s", resp.Status)
 	}
 	return nil
+}
+
+func (c *ProcessConnector) Parse(ctx context.Context, req *types.ReadRequest) (*types.ReadResult, error) {
+	response, err := c.client.Parse(ctx, &pluginapi.ParseRequest{
+		FileContent: req.FileContent, FileName: req.FileName, FileType: req.FileType,
+		URL: req.URL, Title: req.Title, ParserEngineOverrides: req.ParserEngineOverrides,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if response.Error != "" {
+		return nil, errors.New(response.Error)
+	}
+	return &types.ReadResult{MarkdownContent: response.MarkdownContent, Metadata: response.Metadata}, nil
+}
+
+func (c *ProcessConnector) Read(ctx context.Context, req *types.ReadRequest) (*types.ReadResult, error) {
+	return c.Parse(ctx, req)
 }
 
 func (c *ProcessConnector) Validate(ctx context.Context, config *types.DataSourceConfig) error {

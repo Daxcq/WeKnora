@@ -1,0 +1,12 @@
+{
+  "id": "plain-text-parser",
+  "name": "Plain Text Parser",
+  "version": "0.1.0",
+  "protocol_version": 1,
+  "extension_types": ["document_parser"],
+  "file_types": ["md", "markdown", "txt", "text"],
+  "weknora_version": ">=0.6.0 <1.0.0",
+  "permissions": {"allow_network": false},
+  "runtime": {"type": "docker", "image": "weknora-plugin-plain-text-parser:dev"},
+  "description": "A minimal external parser example for Markdown and text files."
+}

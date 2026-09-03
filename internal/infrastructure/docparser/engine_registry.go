@@ -229,5 +229,12 @@ func ListAllEngines(docreaderConnected bool, overrides map[string]string, remote
 		result = append(result, re)
 	}
 
+	for _, external := range ExternalParserEngines() {
+		if seen[external.Name] {
+			continue
+		}
+		result = append(result, external)
+	}
+
 	return result
 }

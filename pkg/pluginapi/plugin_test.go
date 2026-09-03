@@ -57,6 +57,12 @@ func (testConnector) FetchIncremental(context.Context, json.RawMessage, json.Raw
 	return nil, nil, nil
 }
 
+type testParser struct{}
+
+func (testParser) Parse(context.Context, *ParseRequest) (*ParseResponse, error) {
+	return &ParseResponse{MarkdownContent: "# parsed"}, nil
+}
+
 func TestGRPCJSONRoundTrip(t *testing.T) {
 	const bufferSize = 1024 * 1024
 	listener := bufconn.Listen(bufferSize)
@@ -81,6 +87,28 @@ func TestGRPCJSONRoundTrip(t *testing.T) {
 	}
 	if len(response.Items) != 1 || string(response.Items[0].Content) != "content" {
 		t.Fatalf("unexpected response: %#v", response)
+	}
+}
+
+func TestGRPCParserRoundTrip(t *testing.T) {
+	listener := bufconn.Listen(1024 * 1024)
+	server := grpc.NewServer(grpc.ForceServerCodec(JSONCodec{}))
+	RegisterPluginServer(server, &connectorServer{
+		manifest: Manifest{ID: "parser", Name: "Parser", Version: "1.0.0", ProtocolVersion: ProtocolVersion, ExtensionTypes: []string{"document_parser"}, WeKnoraVersion: "*", Runtime: Runtime{Type: "process", Command: "test"}},
+		parser:   testParser{},
+	})
+	go func() { _ = server.Serve(listener) }()
+	defer server.Stop()
+
+	conn, err := grpc.DialContext(context.Background(), "bufnet", grpc.WithContextDialer(func(context.Context, string) (net.Conn, error) { return listener.Dial() }), grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithDefaultCallOptions(grpc.ForceCodec(JSONCodec{})))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+
+	response, err := NewPluginClient(conn).Parse(context.Background(), &ParseRequest{FileName: "a.md"})
+	if err != nil || response.MarkdownContent != "# parsed" {
+		t.Fatalf("unexpected parser response: %#v, %v", response, err)
 	}
 }
 

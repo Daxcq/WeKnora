@@ -46,6 +46,7 @@ type Manifest struct {
 	Version         string        `json:"version" yaml:"version"`
 	ProtocolVersion int           `json:"protocol_version" yaml:"protocol_version"`
 	ExtensionTypes  []string      `json:"extension_types" yaml:"extension_types"`
+	FileTypes       []string      `json:"file_types,omitempty" yaml:"file_types,omitempty"`
 	WeKnoraVersion  string        `json:"weknora_version" yaml:"weknora_version"`
 	Config          []ConfigField `json:"config,omitempty" yaml:"config,omitempty"`
 	Permissions     Permissions   `json:"permissions" yaml:"permissions"`
@@ -139,17 +140,48 @@ type Connector interface {
 	FetchIncremental(context.Context, json.RawMessage, json.RawMessage) ([]FetchedItem, json.RawMessage, error)
 }
 
+// Parser is the implementation surface for an external document parser.
+// The host keeps chunking, embedding, and indexing in the normal pipeline.
+type Parser interface {
+	Parse(context.Context, *ParseRequest) (*ParseResponse, error)
+}
+
+type ParseRequest struct {
+	FileContent           []byte            `json:"file_content,omitempty"`
+	FileName              string            `json:"file_name,omitempty"`
+	FileType              string            `json:"file_type,omitempty"`
+	URL                   string            `json:"url,omitempty"`
+	Title                 string            `json:"title,omitempty"`
+	ParserEngineOverrides map[string]string `json:"parser_engine_overrides,omitempty"`
+}
+
+type ParseResponse struct {
+	MarkdownContent string            `json:"markdown_content,omitempty"`
+	Metadata        map[string]string `json:"metadata,omitempty"`
+	Error           string            `json:"error,omitempty"`
+}
+
 type connectorServer struct {
 	UnimplementedPluginServer
 	manifest  Manifest
 	connector Connector
+	parser    Parser
 	server    *grpc.Server
 	stop      chan struct{}
 }
 
-func Serve(manifest Manifest, connector Connector) error {
+func Serve(manifest Manifest, implementation interface{}) error {
 	if err := ValidateManifest(manifest); err != nil {
 		return err
+	}
+	srv := &connectorServer{manifest: manifest, stop: make(chan struct{})}
+	switch implementation := implementation.(type) {
+	case Connector:
+		srv.connector = implementation
+	case Parser:
+		srv.parser = implementation
+	default:
+		return fmt.Errorf("plugin implementation must be Connector or Parser")
 	}
 	var listener net.Listener
 	var err error
@@ -165,7 +197,6 @@ func Serve(manifest Manifest, connector Connector) error {
 			return err
 		}
 	}
-	srv := &connectorServer{manifest: manifest, connector: connector, stop: make(chan struct{})}
 	srv.server = grpc.NewServer(grpc.ForceServerCodec(JSONCodec{}))
 	RegisterPluginServer(srv.server, srv)
 	go func() {
@@ -198,8 +229,21 @@ func (s *connectorServer) FetchAll(ctx context.Context, req *ConnectorRequest) (
 	return &FetchResponse{Items: items, Error: errorString(err)}, nil
 }
 func (s *connectorServer) FetchIncremental(ctx context.Context, req *ConnectorRequest) (*FetchResponse, error) {
+	if s.connector == nil {
+		return nil, status.Error(codes.Unimplemented, "FetchIncremental not implemented")
+	}
 	items, cursor, err := s.connector.FetchIncremental(ctx, req.Config, req.Cursor)
 	return &FetchResponse{Items: items, NextCursor: cursor, Error: errorString(err)}, nil
+}
+func (s *connectorServer) Parse(ctx context.Context, req *ParseRequest) (*ParseResponse, error) {
+	if s.parser == nil {
+		return nil, status.Error(codes.Unimplemented, "Parse not implemented")
+	}
+	response, err := s.parser.Parse(ctx, req)
+	if err != nil {
+		return &ParseResponse{Error: err.Error()}, nil
+	}
+	return response, nil
 }
 func (s *connectorServer) Shutdown(context.Context, *ShutdownRequest) (*ShutdownResponse, error) {
 	select {
@@ -286,6 +330,7 @@ type PluginServer interface {
 	ResolveResourceAncestors(context.Context, *ConnectorRequest) (*AncestorsResponse, error)
 	FetchAll(context.Context, *ConnectorRequest) (*FetchResponse, error)
 	FetchIncremental(context.Context, *ConnectorRequest) (*FetchResponse, error)
+	Parse(context.Context, *ParseRequest) (*ParseResponse, error)
 	Shutdown(context.Context, *ShutdownRequest) (*ShutdownResponse, error)
 }
 
@@ -311,6 +356,9 @@ func (UnimplementedPluginServer) FetchAll(context.Context, *ConnectorRequest) (*
 }
 func (UnimplementedPluginServer) FetchIncremental(context.Context, *ConnectorRequest) (*FetchResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "FetchIncremental not implemented")
+}
+func (UnimplementedPluginServer) Parse(context.Context, *ParseRequest) (*ParseResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "Parse not implemented")
 }
 func (UnimplementedPluginServer) Shutdown(context.Context, *ShutdownRequest) (*ShutdownResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "Shutdown not implemented")
@@ -345,6 +393,9 @@ var Plugin_ServiceDesc = grpc.ServiceDesc{
 		{MethodName: "FetchIncremental", Handler: unaryHandler(func() interface{} { return new(ConnectorRequest) }, func(s PluginServer, c context.Context, in interface{}) (interface{}, error) {
 			return s.FetchIncremental(c, in.(*ConnectorRequest))
 		})},
+		{MethodName: "Parse", Handler: unaryHandler(func() interface{} { return new(ParseRequest) }, func(s PluginServer, c context.Context, in interface{}) (interface{}, error) {
+			return s.Parse(c, in.(*ParseRequest))
+		})},
 		{MethodName: "Shutdown", Handler: unaryHandler(func() interface{} { return new(ShutdownRequest) }, func(s PluginServer, c context.Context, in interface{}) (interface{}, error) {
 			return s.Shutdown(c, in.(*ShutdownRequest))
 		})},
@@ -376,6 +427,7 @@ type PluginClient interface {
 	ResolveResourceAncestors(context.Context, *ConnectorRequest, ...grpc.CallOption) (*AncestorsResponse, error)
 	FetchAll(context.Context, *ConnectorRequest, ...grpc.CallOption) (*FetchResponse, error)
 	FetchIncremental(context.Context, *ConnectorRequest, ...grpc.CallOption) (*FetchResponse, error)
+	Parse(context.Context, *ParseRequest, ...grpc.CallOption) (*ParseResponse, error)
 	Shutdown(context.Context, *ShutdownRequest, ...grpc.CallOption) (*ShutdownResponse, error)
 }
 
@@ -414,6 +466,10 @@ func (c *pluginClient) FetchAll(ctx context.Context, in *ConnectorRequest, opts 
 func (c *pluginClient) FetchIncremental(ctx context.Context, in *ConnectorRequest, opts ...grpc.CallOption) (*FetchResponse, error) {
 	out := new(FetchResponse)
 	return out, invoke(c, ctx, "FetchIncremental", in, out, opts...)
+}
+func (c *pluginClient) Parse(ctx context.Context, in *ParseRequest, opts ...grpc.CallOption) (*ParseResponse, error) {
+	out := new(ParseResponse)
+	return out, invoke(c, ctx, "Parse", in, out, opts...)
 }
 func (c *pluginClient) Shutdown(ctx context.Context, in *ShutdownRequest, opts ...grpc.CallOption) (*ShutdownResponse, error) {
 	out := new(ShutdownResponse)

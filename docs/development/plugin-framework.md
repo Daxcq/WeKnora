@@ -2,11 +2,11 @@
 
 ## Scope
 
-The first implementation externalizes data-source connectors. Document parsing,
-embedding, retrieval engines, web search, and model providers continue to use
-their existing in-process registries. They can reuse the same manifest and
-lifecycle ideas later, but changing all four extension points at once would
-make compatibility and rollback harder to verify.
+The first implementation externalizes data-source connectors and document
+parser engines. Embedding, retrieval engines, web search, and model providers
+continue to use their existing in-process registries. They can reuse the same
+manifest and lifecycle ideas later, but changing all extension points at once
+would make compatibility and rollback harder to verify.
 
 ## Chosen route
 
@@ -21,7 +21,8 @@ The host does the following:
 2. Reads `manifest.json`, `manifest.yaml`, or `manifest.yml`.
 3. Checks the protocol and WeKnora version range.
 4. Starts the declared runtime and checks `GetManifest` and `Health`.
-5. Wraps the gRPC client as the existing `datasource.Connector` interface.
+5. Wraps the gRPC client as the existing datasource connector or document
+   reader interface.
 6. Stops the process during application cleanup.
 
 Built-in and external data-source connectors are both registered in
@@ -34,7 +35,8 @@ such as `{"enabled":false}`.
 
 The existing `DataSourceService` therefore keeps the same full/incremental
 sync, cursor, ingestion, and logging behavior for built-in and external
-connectors.
+connectors. Parser plugins return Markdown; the existing knowledge pipeline
+continues with status tracking, chunking, embedding, and indexing.
 
 ## Manifest
 
@@ -45,6 +47,7 @@ connectors.
   "version": "0.1.0",
   "protocol_version": 1,
   "extension_types": ["datasource"],
+  "file_types": ["md", "markdown"],
   "weknora_version": ">=0.6.0 <1.0.0",
   "config": [
     {"name": "settings.root_path", "type": "directory", "required": true}
@@ -95,11 +98,13 @@ ListResources
 ResolveResourceAncestors
 FetchAll
 FetchIncremental
+Parse (when `extension_types` contains `document_parser`)
 Shutdown
 ```
 
-The plugin returns source data only. It does not parse documents, chunk text,
-call embedding models, or write to the knowledge base.
+Datasource plugins return source data only. Parser plugins return parsed
+Markdown only. Neither kind chunks text, calls embedding models, or writes to
+the knowledge base.
 
 ## Example
 
@@ -142,6 +147,10 @@ Build and test from the plugin repository:
 go test ./...
 docker build -t replace-me:dev .
 ```
+
+For a minimal parser, copy `examples/plugins/plain-text-parser`. Its `Parse`
+method handles Markdown and text files. Set `file_types` in the manifest and
+select the plugin ID in a parser-engine rule.
 
 Copy only the manifest into a child directory of `WEKNORA_PLUGIN_DIR` when the
 runtime image is already available on the host. Restart WeKnora and confirm the

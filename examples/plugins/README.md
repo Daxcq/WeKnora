@@ -11,6 +11,10 @@ go test ./...
 docker build -t weknora-plugin-local-files:dev .
 ```
 
+`local-files` is a datasource example. `plain-text-parser` is the smallest
+document-parser example; its `Parse` method returns Markdown and the host
+continues with chunking and embedding.
+
 Install the manifest as one child directory of `WEKNORA_PLUGIN_DIR`. For a
 Docker runtime, the image must already exist on the Docker host. For a process
 runtime, the executable must be present in the mounted plugin directory.
