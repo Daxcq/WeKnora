@@ -18,8 +18,12 @@ import (
 
 	"github.com/Tencent/WeKnora/internal/datasource"
 	"github.com/Tencent/WeKnora/internal/infrastructure/docparser"
+	infra_web_search "github.com/Tencent/WeKnora/internal/infrastructure/web_search"
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/models/chat"
+	"github.com/Tencent/WeKnora/internal/models/provider"
 	"github.com/Tencent/WeKnora/internal/types"
+	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/Tencent/WeKnora/pkg/pluginapi"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
@@ -31,11 +35,12 @@ type Manager struct {
 	mu         sync.Mutex
 	connectors []*ProcessConnector
 	parsers    []string
+	models     []provider.ProviderName
 }
 
 func NewManager() *Manager { return &Manager{} }
 
-func (m *Manager) LoadDirectory(ctx context.Context, registry *datasource.ConnectorRegistry, dir string) error {
+func (m *Manager) LoadDirectory(ctx context.Context, registry *datasource.ConnectorRegistry, searchRegistry *infra_web_search.Registry, dir string) error {
 	if strings.TrimSpace(dir) == "" {
 		return nil
 	}
@@ -59,17 +64,76 @@ func (m *Manager) LoadDirectory(ctx context.Context, registry *datasource.Connec
 		}
 		hasDatasource := contains(connector.manifest.ExtensionTypes, "datasource")
 		hasParser := contains(connector.manifest.ExtensionTypes, "document_parser")
-		if !hasDatasource && !hasParser {
+		hasWebSearch := contains(connector.manifest.ExtensionTypes, "web_search")
+		hasModel := contains(connector.manifest.ExtensionTypes, "model_provider")
+		if !hasDatasource && !hasParser && !hasWebSearch && !hasModel {
 			_ = connector.Close()
 			errs = append(errs, fmt.Errorf("plugin %s provides no supported extension", entry.Name()))
 			continue
+		}
+		if hasWebSearch {
+			info := webSearchMetadata(connector.manifest)
+			if err := searchRegistry.RegisterExternal(info, func(params types.WebSearchProviderParameters) (interfaces.WebSearchProvider, error) {
+				return &processWebSearchProvider{connector: connector, params: params}, nil
+			}); err != nil {
+				_ = connector.Close()
+				errs = append(errs, fmt.Errorf("register web search plugin %s: %w", entry.Name(), err))
+				continue
+			}
+		}
+		if hasModel {
+			if len(connector.manifest.ModelTypes) != 1 || !strings.EqualFold(connector.manifest.ModelTypes[0], "chat") {
+				_ = connector.Close()
+				errs = append(errs, fmt.Errorf("model plugin %s currently supports only model_types [chat]", entry.Name()))
+				continue
+			}
+			modelName := provider.ProviderName(connector.Type())
+			info := modelProviderMetadata(connector.manifest)
+			validate := func(config *provider.Config) error {
+				checkCtx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+				defer cancel()
+				response, err := connector.client.ValidateModelConfig(checkCtx, &pluginapi.ModelValidateRequest{Config: modelConfigFromProvider(config)})
+				if err != nil {
+					return err
+				}
+				if response.Error != "" {
+					return errors.New(response.Error)
+				}
+				return nil
+			}
+			if err := provider.RegisterExternal(info, validate, connector.Health); err != nil {
+				if hasWebSearch {
+					searchRegistry.UnregisterExternal(connector.Type())
+				}
+				_ = connector.Close()
+				errs = append(errs, fmt.Errorf("register model plugin %s: %w", entry.Name(), err))
+				continue
+			}
+			if err := chat.RegisterExternalChat(modelName, func(cfg *chat.ChatConfig) (chat.Chat, error) {
+				return &processChatModel{connector: connector, config: cfg}, nil
+			}); err != nil {
+				provider.UnregisterExternal(modelName)
+				if hasWebSearch {
+					searchRegistry.UnregisterExternal(connector.Type())
+				}
+				_ = connector.Close()
+				errs = append(errs, fmt.Errorf("register model runtime %s: %w", entry.Name(), err))
+				continue
+			}
 		}
 		if hasParser {
 			if err := docparser.RegisterExternalParser(connector.Type(), connector, types.ParserEngineInfo{
 				Name: connector.Type(), Description: connector.manifest.Description,
 				FileTypes: connector.manifest.FileTypes,
-				Available: true,
+				Available: true, External: true,
 			}); err != nil {
+				if hasWebSearch {
+					searchRegistry.UnregisterExternal(connector.Type())
+				}
+				if hasModel {
+					provider.UnregisterExternal(provider.ProviderName(connector.Type()))
+					chat.UnregisterExternalChat(provider.ProviderName(connector.Type()))
+				}
 				_ = connector.Close()
 				errs = append(errs, fmt.Errorf("register parser plugin %s: %w", entry.Name(), err))
 				continue
@@ -80,6 +144,13 @@ func (m *Manager) LoadDirectory(ctx context.Context, registry *datasource.Connec
 				if hasParser {
 					docparser.UnregisterExternalParser(connector.Type())
 				}
+				if hasWebSearch {
+					searchRegistry.UnregisterExternal(connector.Type())
+				}
+				if hasModel {
+					provider.UnregisterExternal(provider.ProviderName(connector.Type()))
+					chat.UnregisterExternalChat(provider.ProviderName(connector.Type()))
+				}
 				_ = connector.Close()
 				errs = append(errs, fmt.Errorf("register plugin %s: %w", entry.Name(), err))
 				continue
@@ -87,12 +158,16 @@ func (m *Manager) LoadDirectory(ctx context.Context, registry *datasource.Connec
 			datasource.ConnectorMetadataRegistry[connector.Type()] = datasource.ConnectorMetadata{
 				Type: connector.Type(), Name: connector.manifest.Name, Description: connector.manifest.Description,
 				AuthType: "custom", Capabilities: []string{"incremental"}, Config: configMetadata(connector.manifest.Config), External: true,
+				Permissions: &datasource.ConnectorPermissions{AllowNetwork: connector.manifest.Permissions.AllowNetwork, ReadPaths: connector.manifest.Permissions.ReadPaths},
 			}
 		}
 		m.mu.Lock()
 		m.connectors = append(m.connectors, connector)
 		if hasParser {
 			m.parsers = append(m.parsers, connector.Type())
+		}
+		if hasModel {
+			m.models = append(m.models, provider.ProviderName(connector.Type()))
 		}
 		m.mu.Unlock()
 		if hasDatasource {
@@ -101,8 +176,69 @@ func (m *Manager) LoadDirectory(ctx context.Context, registry *datasource.Connec
 		if hasParser {
 			logger.Infof(ctx, "external document parser plugin loaded: id=%s version=%s", connector.manifest.ID, connector.manifest.Version)
 		}
+		if hasWebSearch {
+			logger.Infof(ctx, "external web search plugin loaded: id=%s version=%s", connector.manifest.ID, connector.manifest.Version)
+		}
+		if hasModel {
+			logger.Infof(ctx, "external model provider plugin loaded: id=%s version=%s", connector.manifest.ID, connector.manifest.Version)
+		}
 	}
 	return errors.Join(errs...)
+}
+
+func webSearchMetadata(manifest pluginapi.Manifest) types.WebSearchProviderTypeInfo {
+	info := types.WebSearchProviderTypeInfo{
+		ID: manifest.ID, Name: manifest.Name, Description: manifest.Description,
+		External: true,
+		Permissions: &types.WebSearchProviderPermissions{
+			AllowNetwork: manifest.Permissions.AllowNetwork, ReadPaths: manifest.Permissions.ReadPaths,
+		},
+	}
+	for _, field := range manifest.Config {
+		switch field.Name {
+		case "api_key":
+			info.RequiresAPIKey = field.Required
+		case "engine_id":
+			info.RequiresEngineID = field.Required
+		case "base_url":
+			info.RequiresBaseURL = field.Required
+		case "proxy_url":
+			info.SupportsProxy = true
+		}
+	}
+	return info
+}
+
+func modelProviderMetadata(manifest pluginapi.Manifest) provider.ProviderInfo {
+	info := provider.ProviderInfo{
+		Name: provider.ProviderName(manifest.ID), DisplayName: manifest.Name,
+		Description: manifest.Description, External: true,
+		DefaultURLs: map[types.ModelType]string{},
+		Permissions: &provider.ProviderPermissions{
+			AllowNetwork: manifest.Permissions.AllowNetwork, ReadPaths: manifest.Permissions.ReadPaths,
+		},
+	}
+	for _, modelType := range manifest.ModelTypes {
+		switch strings.ToLower(modelType) {
+		case "chat":
+			info.ModelTypes = append(info.ModelTypes, types.ModelTypeKnowledgeQA)
+		case "embedding":
+			info.ModelTypes = append(info.ModelTypes, types.ModelTypeEmbedding)
+		case "rerank":
+			info.ModelTypes = append(info.ModelTypes, types.ModelTypeRerank)
+		case "vllm":
+			info.ModelTypes = append(info.ModelTypes, types.ModelTypeVLLM)
+		case "asr":
+			info.ModelTypes = append(info.ModelTypes, types.ModelTypeASR)
+		}
+	}
+	for _, field := range manifest.Config {
+		info.ExtraFields = append(info.ExtraFields, provider.ExtraFieldConfig{
+			Key: field.Name, Label: field.Name, Type: field.Type,
+			Required: field.Required,
+		})
+	}
+	return info
 }
 
 func configMetadata(fields []pluginapi.ConfigField) []datasource.ConnectorConfigField {
@@ -124,6 +260,11 @@ func (m *Manager) Close() error {
 		docparser.UnregisterExternalParser(name)
 	}
 	m.parsers = nil
+	for _, name := range m.models {
+		chat.UnregisterExternalChat(name)
+		provider.UnregisterExternal(name)
+	}
+	m.models = nil
 	for _, connector := range m.connectors {
 		if err := connector.Close(); err != nil {
 			errs = append(errs, err)
@@ -200,7 +341,7 @@ func NewProcessPlugin(ctx context.Context, manifestPath string) (*ProcessConnect
 	if err != nil {
 		return nil, err
 	}
-	if !contains(manifest.ExtensionTypes, "datasource") && !contains(manifest.ExtensionTypes, "document_parser") {
+	if !contains(manifest.ExtensionTypes, "datasource") && !contains(manifest.ExtensionTypes, "document_parser") && !contains(manifest.ExtensionTypes, "web_search") && !contains(manifest.ExtensionTypes, "model_provider") {
 		return nil, fmt.Errorf("plugin %q provides no supported extension", manifest.ID)
 	}
 	if manifest.Runtime.Type == "process" && !manifest.Permissions.AllowNetwork {
@@ -302,6 +443,130 @@ func NewProcessPlugin(ctx context.Context, manifestPath string) (*ProcessConnect
 		return nil, fmt.Errorf("plugin health check: %w", err)
 	}
 	return connector, nil
+}
+
+type processWebSearchProvider struct {
+	connector *ProcessConnector
+	params    types.WebSearchProviderParameters
+}
+
+type processChatModel struct {
+	connector *ProcessConnector
+	config    *chat.ChatConfig
+}
+
+func (p *processChatModel) GetModelName() string { return p.config.ModelName }
+func (p *processChatModel) GetModelID() string   { return p.config.ModelID }
+
+func (p *processChatModel) Chat(ctx context.Context, messages []chat.Message, opts *chat.ChatOptions) (*types.ChatResponse, error) {
+	request := &pluginapi.ModelChatRequest{Config: modelConfigFromChat(p.config), Options: mustJSON(opts)}
+	request.Messages = make([]pluginapi.ChatMessage, 0, len(messages))
+	for _, message := range messages {
+		converted := pluginapi.ChatMessage{
+			Role: message.Role, Content: message.Content, Name: message.Name,
+			ToolCallID: message.ToolCallID, Images: message.Images,
+			ReasoningContent: message.ReasoningContent,
+		}
+		for _, toolCall := range message.ToolCalls {
+			converted.ToolCalls = append(converted.ToolCalls, pluginapi.ChatToolCall{
+				ID: toolCall.ID, Type: toolCall.Type, Name: toolCall.Function.Name, Arguments: toolCall.Function.Arguments,
+				ProviderMetadata: toolCall.ProviderMetadata,
+			})
+		}
+		for _, part := range message.MultiContent {
+			convertedPart := pluginapi.ChatContentPart{Type: part.Type, Text: part.Text}
+			if part.ImageURL != nil {
+				convertedPart.ImageURL = &pluginapi.ChatImageURL{URL: part.ImageURL.URL, Detail: part.ImageURL.Detail}
+			}
+			converted.MultiContent = append(converted.MultiContent, convertedPart)
+		}
+		request.Messages = append(request.Messages, converted)
+	}
+	response, err := p.connector.client.Chat(ctx, request)
+	if err != nil {
+		return nil, err
+	}
+	if response.Error != "" {
+		return nil, errors.New(response.Error)
+	}
+	result := &types.ChatResponse{
+		Content: response.Content, ReasoningContent: response.ReasoningContent,
+		FinishReason: response.FinishReason,
+		Usage:        types.TokenUsage{PromptTokens: response.Usage.PromptTokens, CompletionTokens: response.Usage.CompletionTokens, TotalTokens: response.Usage.TotalTokens},
+	}
+	for _, toolCall := range response.ToolCalls {
+		result.ToolCalls = append(result.ToolCalls, types.LLMToolCall{
+			ID: toolCall.ID, Type: toolCall.Type,
+			Function: types.FunctionCall{Name: toolCall.Name, Arguments: toolCall.Arguments}, ProviderMetadata: toolCall.ProviderMetadata,
+		})
+	}
+	return result, nil
+}
+
+func modelConfigFromChat(config *chat.ChatConfig) pluginapi.ModelConfig {
+	return pluginapi.ModelConfig{
+		Source: string(config.Source), BaseURL: config.BaseURL, ModelName: config.ModelName,
+		APIKey: config.APIKey, ModelID: config.ModelID, Provider: config.Provider,
+		ExtraConfig: config.ExtraConfig, CustomHeaders: config.CustomHeaders,
+	}
+}
+
+func modelConfigFromProvider(config *provider.Config) pluginapi.ModelConfig {
+	extra := make(map[string]string, len(config.Extra))
+	for key, value := range config.Extra {
+		extra[key] = fmt.Sprint(value)
+	}
+	return pluginapi.ModelConfig{
+		BaseURL: config.BaseURL, ModelName: config.ModelName, APIKey: config.APIKey,
+		ModelID: config.ModelID, Provider: string(config.Provider), ExtraConfig: extra,
+	}
+}
+
+func (p *processChatModel) ChatStream(ctx context.Context, messages []chat.Message, opts *chat.ChatOptions) (<-chan types.StreamResponse, error) {
+	stream := make(chan types.StreamResponse, 2)
+	go func() {
+		defer close(stream)
+		response, err := p.Chat(ctx, messages, opts)
+		if err != nil {
+			stream <- types.StreamResponse{ResponseType: types.ResponseTypeError, Content: err.Error(), Done: true}
+			return
+		}
+		if response.ReasoningContent != "" {
+			stream <- types.StreamResponse{ResponseType: types.ResponseTypeThinking, Content: response.ReasoningContent}
+		}
+		stream <- types.StreamResponse{
+			ResponseType: types.ResponseTypeAnswer, Content: response.Content,
+			ToolCalls: response.ToolCalls, Usage: &response.Usage,
+			FinishReason: response.FinishReason, Done: true,
+		}
+	}()
+	return stream, nil
+}
+
+func (p *processWebSearchProvider) Name() string { return p.connector.Type() }
+
+func (p *processWebSearchProvider) Health(ctx context.Context) error {
+	return p.connector.Health(ctx)
+}
+
+func (p *processWebSearchProvider) Search(ctx context.Context, query string, maxResults int, includeDate bool) ([]*types.WebSearchResult, error) {
+	response, err := p.connector.client.Search(ctx, &pluginapi.SearchRequest{
+		Config: mustJSON(p.params), Query: query, MaxResults: maxResults, IncludeDate: includeDate,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if response.Error != "" {
+		return nil, errors.New(response.Error)
+	}
+	results := make([]*types.WebSearchResult, 0, len(response.Results))
+	for _, result := range response.Results {
+		results = append(results, &types.WebSearchResult{
+			Title: result.Title, URL: result.URL, Snippet: result.Snippet, Content: result.Content,
+			Source: result.Source, PublishedAt: result.PublishedAt,
+		})
+	}
+	return results, nil
 }
 
 func (c *ProcessConnector) Type() string { return c.manifest.ID }

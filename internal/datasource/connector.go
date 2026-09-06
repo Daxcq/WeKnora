@@ -60,6 +60,8 @@ type ConnectorRegistry struct {
 	disabled   map[string]bool
 }
 
+const DisabledPluginsSettingKey = "plugins.disabled"
+
 // ConnectorStatus is the runtime state of a registered connector.
 type ConnectorStatus struct {
 	Type    string `json:"type"`
@@ -176,6 +178,20 @@ func (r *ConnectorRegistry) List() []string {
 	return types
 }
 
+// DisabledTypes returns a deterministic snapshot of explicitly disabled connectors.
+func (r *ConnectorRegistry) DisabledTypes() []string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	result := make([]string, 0, len(r.disabled))
+	for connectorType, disabled := range r.disabled {
+		if disabled {
+			result = append(result, connectorType)
+		}
+	}
+	sort.Strings(result)
+	return result
+}
+
 // ConnectorMetadata provides metadata about available connectors
 type ConnectorMetadata struct {
 	Type         string                 `json:"type"`
@@ -187,6 +203,12 @@ type ConnectorMetadata struct {
 	Capabilities []string               `json:"capabilities"` // "incremental", "webhook", "deletion_sync", etc.
 	Config       []ConnectorConfigField `json:"config,omitempty"`
 	External     bool                   `json:"external,omitempty"`
+	Permissions  *ConnectorPermissions  `json:"permissions,omitempty"`
+}
+
+type ConnectorPermissions struct {
+	AllowNetwork bool     `json:"allow_network"`
+	ReadPaths    []string `json:"read_paths,omitempty"`
 }
 
 type ConnectorConfigField struct {

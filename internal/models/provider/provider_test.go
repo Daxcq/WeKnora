@@ -278,3 +278,23 @@ func TestListByModelType(t *testing.T) {
 		assert.True(t, found, "Gemini should support embedding via the native Gemini API")
 	})
 }
+
+func TestExternalProviderRegistry(t *testing.T) {
+	name := ProviderName("test-external-provider")
+	err := RegisterExternal(ProviderInfo{
+		Name: name, DisplayName: "External", ModelTypes: []types.ModelType{types.ModelTypeKnowledgeQA},
+	}, func(config *Config) error {
+		if config.ModelName == "" {
+			return assert.AnError
+		}
+		return nil
+	}, nil)
+	require.NoError(t, err)
+	defer UnregisterExternal(name)
+
+	p, ok := Get(name)
+	require.True(t, ok)
+	assert.Error(t, p.ValidateConfig(&Config{}))
+	assert.Contains(t, ListByModelType(types.ModelTypeKnowledgeQA), p.Info())
+	assert.Contains(t, ExternalStatuses(t.Context()), ProviderStatus{Type: string(name), Healthy: true})
+}

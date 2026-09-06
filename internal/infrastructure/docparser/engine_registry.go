@@ -1,6 +1,7 @@
 package docparser
 
 import (
+	"context"
 	"strings"
 
 	"github.com/Tencent/WeKnora/internal/types"
@@ -187,7 +188,7 @@ func (e *paddleOCRVLCloudEngine) CheckAvailable(_ bool, overrides map[string]str
 //     authoritative for its own capabilities).
 //   - Remote engines not present locally are appended as-is, enabling
 //     auto-discovery of newly added docreader engines without Go changes.
-func ListAllEngines(docreaderConnected bool, overrides map[string]string, remoteEngines []types.ParserEngineInfo) []types.ParserEngineInfo {
+func ListAllEngines(ctx context.Context, docreaderConnected bool, overrides map[string]string, remoteEngines []types.ParserEngineInfo) []types.ParserEngineInfo {
 	remoteMap := make(map[string]types.ParserEngineInfo, len(remoteEngines))
 	for _, re := range remoteEngines {
 		remoteMap[re.Name] = re
@@ -229,7 +230,7 @@ func ListAllEngines(docreaderConnected bool, overrides map[string]string, remote
 		result = append(result, re)
 	}
 
-	for _, external := range ExternalParserEngines() {
+	for _, external := range ExternalParserEngines(ctx) {
 		if seen[external.Name] {
 			continue
 		}

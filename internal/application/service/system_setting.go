@@ -99,6 +99,12 @@ type settingSpec struct {
 // the new value, no in-memory state bound at init time we cannot
 // re-derive)".
 var registry = map[string]settingSpec{
+	"plugins.disabled": {
+		Type:        "string_list",
+		Default:     []string{},
+		Category:    "plugins",
+		Description: "已禁用的外部插件类型。修改插件启用状态后立即生效，重启服务后仍保持。",
+	},
 	// NOTE: file.max_size_mb is intentionally NOT registered. Although
 	// the Go upload handlers accept a runtime override via
 	// systemSettingSvc.GetInt, the actual upload limit is gated end-to-end

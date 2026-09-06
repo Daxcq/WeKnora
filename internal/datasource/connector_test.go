@@ -3,6 +3,7 @@ package datasource
 import (
 	"context"
 	"errors"
+	"reflect"
 	"testing"
 
 	"github.com/Tencent/WeKnora/internal/types"
@@ -90,5 +91,20 @@ func TestConnectorRegistryStatusesAreSortedAndIncludeDisabledHealth(t *testing.T
 	}
 	if statuses[0].Enabled != true || statuses[1].Enabled != false {
 		t.Fatalf("unexpected enabled states: %#v", statuses)
+	}
+}
+
+func TestConnectorRegistryDisabledTypes(t *testing.T) {
+	r := NewConnectorRegistry()
+	for _, connectorType := range []string{"zeta", "alpha"} {
+		if err := r.Register(registryTestConnector{connectorType: connectorType}); err != nil {
+			t.Fatal(err)
+		}
+		if err := r.SetEnabled(connectorType, false); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if got := r.DisabledTypes(); !reflect.DeepEqual(got, []string{"alpha", "zeta"}) {
+		t.Fatalf("unexpected disabled connector types: %v", got)
 	}
 }

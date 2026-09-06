@@ -3,16 +3,16 @@ package handler
 import (
 	"net/http"
 
-	"github.com/Tencent/WeKnora/internal/types"
+	infra_web_search "github.com/Tencent/WeKnora/internal/infrastructure/web_search"
 	"github.com/gin-gonic/gin"
 )
 
 // WebSearchHandler handles legacy web search related requests
-type WebSearchHandler struct{}
+type WebSearchHandler struct{ registry *infra_web_search.Registry }
 
 // NewWebSearchHandler creates a new web search handler
-func NewWebSearchHandler() *WebSearchHandler {
-	return &WebSearchHandler{}
+func NewWebSearchHandler(registry *infra_web_search.Registry) *WebSearchHandler {
+	return &WebSearchHandler{registry: registry}
 }
 
 // GetProviders returns the list of available web search provider types.
@@ -29,6 +29,6 @@ func NewWebSearchHandler() *WebSearchHandler {
 func (h *WebSearchHandler) GetProviders(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
-		"data":    types.GetWebSearchProviderTypes(),
+		"data":    h.registry.ProviderTypes(),
 	})
 }

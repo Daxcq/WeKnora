@@ -247,7 +247,7 @@ func (h *SystemHandler) ListParserEngines(c *gin.Context) {
 	reader, docreaderAddr, docreaderTransport := h.resolveDocReader(c.Request.Context(), overrides)
 	connected := reader != nil && reader.IsConnected()
 	remoteEngines := h.fetchRemoteEngines(c.Request.Context(), reader, overrides)
-	engines := docparser.ListAllEngines(connected, overrides, remoteEngines)
+	engines := docparser.ListAllEngines(c.Request.Context(), connected, overrides, remoteEngines)
 	c.JSON(200, gin.H{"code": 0, "msg": "success", "data": engines, "docreader_addr": docreaderAddr, "docreader_transport": docreaderTransport, "connected": connected})
 }
 
@@ -306,7 +306,7 @@ func (h *SystemHandler) ReconnectDocReader(c *gin.Context) {
 		}
 	}
 	remoteEngines := h.fetchRemoteEngines(c.Request.Context(), h.documentReader, overrides)
-	engines := docparser.ListAllEngines(true, overrides, remoteEngines)
+	engines := docparser.ListAllEngines(c.Request.Context(), true, overrides, remoteEngines)
 
 	_, docreaderTransport := h.getDocReaderConnInfo()
 	c.JSON(200, gin.H{"code": 0, "msg": "连接成功", "data": engines, "docreader_addr": addr, "docreader_transport": docreaderTransport, "connected": true})
@@ -348,7 +348,7 @@ func (h *SystemHandler) CheckParserEngines(c *gin.Context) {
 	reader, docreaderAddr, docreaderTransport := h.resolveDocReader(c.Request.Context(), overrides)
 	connected := reader != nil && reader.IsConnected()
 	remoteEngines := h.fetchRemoteEngines(c.Request.Context(), reader, overrides)
-	engines := docparser.ListAllEngines(connected, overrides, remoteEngines)
+	engines := docparser.ListAllEngines(c.Request.Context(), connected, overrides, remoteEngines)
 	c.JSON(200, gin.H{"code": 0, "msg": "success", "data": engines, "docreader_addr": docreaderAddr, "docreader_transport": docreaderTransport, "connected": connected})
 }
 

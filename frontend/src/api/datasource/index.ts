@@ -50,6 +50,10 @@ export interface ConnectorMeta {
   auth_type: string
   capabilities: string[]
   external?: boolean
+  permissions?: {
+    allow_network: boolean
+    read_paths?: string[]
+  }
   config?: {
     name: string
     type: string
@@ -57,6 +61,13 @@ export interface ConnectorMeta {
     secret?: boolean
     description?: string
   }[]
+}
+
+export interface ConnectorStatus {
+  type: string
+  enabled: boolean
+  healthy: boolean
+  error?: string
 }
 
 export interface Resource {
@@ -73,6 +84,14 @@ export interface Resource {
 
 export function getConnectorTypes() {
   return get('/api/v1/datasource/types')
+}
+
+export function getConnectorStatuses() {
+  return get('/api/v1/datasource/types/status')
+}
+
+export function setConnectorEnabled(type: string, enabled: boolean) {
+  return put(`/api/v1/datasource/types/${encodeURIComponent(type)}`, { enabled })
 }
 
 export function listDataSources(kbId: string) {

@@ -322,7 +322,15 @@ func (h *WebSearchProviderHandler) DeleteProvider(c *gin.Context) {
 func (h *WebSearchProviderHandler) ListProviderTypes(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{
 		"success": true,
-		"data":    types.GetWebSearchProviderTypes(),
+		"data":    h.registry.ProviderTypes(),
+	})
+}
+
+// ListExternalProviderStatuses returns health for loaded web-search plugins.
+func (h *WebSearchProviderHandler) ListExternalProviderStatuses(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{
+		"success": true,
+		"data":    h.registry.ExternalStatuses(c.Request.Context()),
 	})
 }
 

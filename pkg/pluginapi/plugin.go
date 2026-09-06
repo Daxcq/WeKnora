@@ -47,6 +47,7 @@ type Manifest struct {
 	ProtocolVersion int           `json:"protocol_version" yaml:"protocol_version"`
 	ExtensionTypes  []string      `json:"extension_types" yaml:"extension_types"`
 	FileTypes       []string      `json:"file_types,omitempty" yaml:"file_types,omitempty"`
+	ModelTypes      []string      `json:"model_types,omitempty" yaml:"model_types,omitempty"`
 	WeKnoraVersion  string        `json:"weknora_version" yaml:"weknora_version"`
 	Config          []ConfigField `json:"config,omitempty" yaml:"config,omitempty"`
 	Permissions     Permissions   `json:"permissions" yaml:"permissions"`
@@ -127,6 +128,93 @@ type FetchResponse struct {
 	Error      string          `json:"error,omitempty"`
 }
 
+type SearchRequest struct {
+	Config      json.RawMessage `json:"config,omitempty"`
+	Query       string          `json:"query"`
+	MaxResults  int             `json:"max_results"`
+	IncludeDate bool            `json:"include_date"`
+}
+
+type SearchResult struct {
+	Title       string     `json:"title"`
+	URL         string     `json:"url"`
+	Snippet     string     `json:"snippet"`
+	Content     string     `json:"content,omitempty"`
+	Source      string     `json:"source,omitempty"`
+	PublishedAt *time.Time `json:"published_at,omitempty"`
+}
+
+type SearchResponse struct {
+	Results []SearchResult `json:"results"`
+	Error   string         `json:"error,omitempty"`
+}
+
+type ChatMessage struct {
+	Role             string            `json:"role"`
+	Content          string            `json:"content"`
+	MultiContent     []ChatContentPart `json:"multi_content,omitempty"`
+	Name             string            `json:"name,omitempty"`
+	ToolCallID       string            `json:"tool_call_id,omitempty"`
+	ToolCalls        []ChatToolCall    `json:"tool_calls,omitempty"`
+	Images           []string          `json:"images,omitempty"`
+	ReasoningContent string            `json:"reasoning_content,omitempty"`
+}
+
+type ChatContentPart struct {
+	Type     string        `json:"type"`
+	Text     string        `json:"text,omitempty"`
+	ImageURL *ChatImageURL `json:"image_url,omitempty"`
+}
+
+type ChatImageURL struct {
+	URL    string `json:"url"`
+	Detail string `json:"detail,omitempty"`
+}
+
+type ChatToolCall struct {
+	ID               string                     `json:"id"`
+	Type             string                     `json:"type"`
+	Name             string                     `json:"name"`
+	Arguments        string                     `json:"arguments"`
+	ProviderMetadata map[string]json.RawMessage `json:"provider_metadata,omitempty"`
+}
+
+type ModelConfig struct {
+	Source        string            `json:"source"`
+	BaseURL       string            `json:"base_url"`
+	ModelName     string            `json:"model_name"`
+	APIKey        string            `json:"api_key"`
+	ModelID       string            `json:"model_id"`
+	Provider      string            `json:"provider"`
+	ExtraConfig   map[string]string `json:"extra_config,omitempty"`
+	CustomHeaders map[string]string `json:"custom_headers,omitempty"`
+}
+
+type ModelChatRequest struct {
+	Config   ModelConfig     `json:"config"`
+	Messages []ChatMessage   `json:"messages"`
+	Options  json.RawMessage `json:"options,omitempty"`
+}
+
+type ModelValidateRequest struct {
+	Config ModelConfig `json:"config"`
+}
+
+type ChatUsage struct {
+	PromptTokens     int `json:"prompt_tokens"`
+	CompletionTokens int `json:"completion_tokens"`
+	TotalTokens      int `json:"total_tokens"`
+}
+
+type ModelChatResponse struct {
+	Content          string         `json:"content,omitempty"`
+	ReasoningContent string         `json:"reasoning_content,omitempty"`
+	ToolCalls        []ChatToolCall `json:"tool_calls,omitempty"`
+	FinishReason     string         `json:"finish_reason,omitempty"`
+	Usage            ChatUsage      `json:"usage"`
+	Error            string         `json:"error,omitempty"`
+}
+
 type ShutdownRequest struct{}
 type ShutdownResponse struct{}
 
@@ -144,6 +232,19 @@ type Connector interface {
 // The host keeps chunking, embedding, and indexing in the normal pipeline.
 type Parser interface {
 	Parse(context.Context, *ParseRequest) (*ParseResponse, error)
+}
+
+// WebSearchProvider is the implementation surface for an external web search plugin.
+// Config is JSON because credentials and provider-specific fields belong to the plugin.
+type WebSearchProvider interface {
+	Search(context.Context, json.RawMessage, string, int, bool) ([]SearchResult, error)
+}
+
+// ModelProvider is the external chat contract. The host adapts this unary
+// response to its normal streaming interface.
+type ModelProvider interface {
+	ValidateConfig(context.Context, ModelConfig) error
+	Chat(context.Context, *ModelChatRequest) (*ModelChatResponse, error)
 }
 
 type ParseRequest struct {
@@ -166,6 +267,8 @@ type connectorServer struct {
 	manifest  Manifest
 	connector Connector
 	parser    Parser
+	search    WebSearchProvider
+	model     ModelProvider
 	server    *grpc.Server
 	stop      chan struct{}
 }
@@ -175,13 +278,20 @@ func Serve(manifest Manifest, implementation interface{}) error {
 		return err
 	}
 	srv := &connectorServer{manifest: manifest, stop: make(chan struct{})}
-	switch implementation := implementation.(type) {
-	case Connector:
-		srv.connector = implementation
-	case Parser:
-		srv.parser = implementation
-	default:
-		return fmt.Errorf("plugin implementation must be Connector or Parser")
+	srv.connector, _ = implementation.(Connector)
+	srv.parser, _ = implementation.(Parser)
+	srv.search, _ = implementation.(WebSearchProvider)
+	srv.model, _ = implementation.(ModelProvider)
+	if srv.connector == nil && srv.parser == nil && srv.search == nil && srv.model == nil {
+		return fmt.Errorf("plugin implementation must be Connector, Parser, WebSearchProvider or ModelProvider")
+	}
+	for _, extensionType := range manifest.ExtensionTypes {
+		if (extensionType == "datasource" && srv.connector == nil) ||
+			(extensionType == "document_parser" && srv.parser == nil) ||
+			(extensionType == "web_search" && srv.search == nil) ||
+			(extensionType == "model_provider" && srv.model == nil) {
+			return fmt.Errorf("plugin implementation does not provide %s", extensionType)
+		}
 	}
 	var listener net.Listener
 	var err error
@@ -244,6 +354,29 @@ func (s *connectorServer) Parse(ctx context.Context, req *ParseRequest) (*ParseR
 		return &ParseResponse{Error: err.Error()}, nil
 	}
 	return response, nil
+}
+func (s *connectorServer) Search(ctx context.Context, req *SearchRequest) (*SearchResponse, error) {
+	if s.search == nil {
+		return nil, status.Error(codes.Unimplemented, "Search not implemented")
+	}
+	results, err := s.search.Search(ctx, req.Config, req.Query, req.MaxResults, req.IncludeDate)
+	return &SearchResponse{Results: results, Error: errorString(err)}, nil
+}
+func (s *connectorServer) Chat(ctx context.Context, req *ModelChatRequest) (*ModelChatResponse, error) {
+	if s.model == nil {
+		return nil, status.Error(codes.Unimplemented, "Chat not implemented")
+	}
+	response, err := s.model.Chat(ctx, req)
+	if err != nil {
+		return &ModelChatResponse{Error: err.Error()}, nil
+	}
+	return response, nil
+}
+func (s *connectorServer) ValidateModelConfig(ctx context.Context, req *ModelValidateRequest) (*ValidateResponse, error) {
+	if s.model == nil {
+		return nil, status.Error(codes.Unimplemented, "ValidateModelConfig not implemented")
+	}
+	return &ValidateResponse{Error: errorString(s.model.ValidateConfig(ctx, req.Config))}, nil
 }
 func (s *connectorServer) Shutdown(context.Context, *ShutdownRequest) (*ShutdownResponse, error) {
 	select {
@@ -331,6 +464,9 @@ type PluginServer interface {
 	FetchAll(context.Context, *ConnectorRequest) (*FetchResponse, error)
 	FetchIncremental(context.Context, *ConnectorRequest) (*FetchResponse, error)
 	Parse(context.Context, *ParseRequest) (*ParseResponse, error)
+	Search(context.Context, *SearchRequest) (*SearchResponse, error)
+	Chat(context.Context, *ModelChatRequest) (*ModelChatResponse, error)
+	ValidateModelConfig(context.Context, *ModelValidateRequest) (*ValidateResponse, error)
 	Shutdown(context.Context, *ShutdownRequest) (*ShutdownResponse, error)
 }
 
@@ -359,6 +495,15 @@ func (UnimplementedPluginServer) FetchIncremental(context.Context, *ConnectorReq
 }
 func (UnimplementedPluginServer) Parse(context.Context, *ParseRequest) (*ParseResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "Parse not implemented")
+}
+func (UnimplementedPluginServer) Search(context.Context, *SearchRequest) (*SearchResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "Search not implemented")
+}
+func (UnimplementedPluginServer) Chat(context.Context, *ModelChatRequest) (*ModelChatResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "Chat not implemented")
+}
+func (UnimplementedPluginServer) ValidateModelConfig(context.Context, *ModelValidateRequest) (*ValidateResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "ValidateModelConfig not implemented")
 }
 func (UnimplementedPluginServer) Shutdown(context.Context, *ShutdownRequest) (*ShutdownResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "Shutdown not implemented")
@@ -396,6 +541,15 @@ var Plugin_ServiceDesc = grpc.ServiceDesc{
 		{MethodName: "Parse", Handler: unaryHandler(func() interface{} { return new(ParseRequest) }, func(s PluginServer, c context.Context, in interface{}) (interface{}, error) {
 			return s.Parse(c, in.(*ParseRequest))
 		})},
+		{MethodName: "Search", Handler: unaryHandler(func() interface{} { return new(SearchRequest) }, func(s PluginServer, c context.Context, in interface{}) (interface{}, error) {
+			return s.Search(c, in.(*SearchRequest))
+		})},
+		{MethodName: "Chat", Handler: unaryHandler(func() interface{} { return new(ModelChatRequest) }, func(s PluginServer, c context.Context, in interface{}) (interface{}, error) {
+			return s.Chat(c, in.(*ModelChatRequest))
+		})},
+		{MethodName: "ValidateModelConfig", Handler: unaryHandler(func() interface{} { return new(ModelValidateRequest) }, func(s PluginServer, c context.Context, in interface{}) (interface{}, error) {
+			return s.ValidateModelConfig(c, in.(*ModelValidateRequest))
+		})},
 		{MethodName: "Shutdown", Handler: unaryHandler(func() interface{} { return new(ShutdownRequest) }, func(s PluginServer, c context.Context, in interface{}) (interface{}, error) {
 			return s.Shutdown(c, in.(*ShutdownRequest))
 		})},
@@ -428,6 +582,9 @@ type PluginClient interface {
 	FetchAll(context.Context, *ConnectorRequest, ...grpc.CallOption) (*FetchResponse, error)
 	FetchIncremental(context.Context, *ConnectorRequest, ...grpc.CallOption) (*FetchResponse, error)
 	Parse(context.Context, *ParseRequest, ...grpc.CallOption) (*ParseResponse, error)
+	Search(context.Context, *SearchRequest, ...grpc.CallOption) (*SearchResponse, error)
+	Chat(context.Context, *ModelChatRequest, ...grpc.CallOption) (*ModelChatResponse, error)
+	ValidateModelConfig(context.Context, *ModelValidateRequest, ...grpc.CallOption) (*ValidateResponse, error)
 	Shutdown(context.Context, *ShutdownRequest, ...grpc.CallOption) (*ShutdownResponse, error)
 }
 
@@ -471,6 +628,18 @@ func (c *pluginClient) Parse(ctx context.Context, in *ParseRequest, opts ...grpc
 	out := new(ParseResponse)
 	return out, invoke(c, ctx, "Parse", in, out, opts...)
 }
+func (c *pluginClient) Search(ctx context.Context, in *SearchRequest, opts ...grpc.CallOption) (*SearchResponse, error) {
+	out := new(SearchResponse)
+	return out, invoke(c, ctx, "Search", in, out, opts...)
+}
+func (c *pluginClient) Chat(ctx context.Context, in *ModelChatRequest, opts ...grpc.CallOption) (*ModelChatResponse, error) {
+	out := new(ModelChatResponse)
+	return out, invoke(c, ctx, "Chat", in, out, opts...)
+}
+func (c *pluginClient) ValidateModelConfig(ctx context.Context, in *ModelValidateRequest, opts ...grpc.CallOption) (*ValidateResponse, error) {
+	out := new(ValidateResponse)
+	return out, invoke(c, ctx, "ValidateModelConfig", in, out, opts...)
+}
 func (c *pluginClient) Shutdown(ctx context.Context, in *ShutdownRequest, opts ...grpc.CallOption) (*ShutdownResponse, error) {
 	out := new(ShutdownResponse)
 	return out, invoke(c, ctx, "Shutdown", in, out, opts...)
@@ -496,6 +665,9 @@ func ValidateManifest(m Manifest) error {
 			return fmt.Errorf("plugin manifest contains duplicate extension type %q", extensionType)
 		}
 		seenTypes[extensionType] = struct{}{}
+	}
+	if _, modelProvider := seenTypes["model_provider"]; modelProvider && len(m.ModelTypes) == 0 {
+		return fmt.Errorf("model_provider plugin requires model_types")
 	}
 	if m.Runtime.Type == "" {
 		return fmt.Errorf("plugin manifest requires runtime.type")

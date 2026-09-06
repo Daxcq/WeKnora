@@ -1,0 +1,21 @@
+{
+  "id": "local-files",
+  "name": "Local Files",
+  "version": "0.1.0",
+  "protocol_version": 1,
+  "extension_types": ["datasource"],
+  "weknora_version": ">=0.6.0 <1.0.0",
+  "config": [
+    {"name": "settings.root_path", "type": "directory", "required": true, "description": "Mounted local directory, for example /weknora/inputs/0"}
+  ],
+  "permissions": {
+    "allow_network": false,
+    "read_paths": ["D:/WeKnora/plugin-test-data"]
+  },
+  "runtime": {
+    "type": "docker",
+    "image": "weknora-plugin-local-files:dev",
+    "port": 50051
+  },
+  "description": "Read a local directory with hash-based incremental sync."
+}

@@ -69,6 +69,7 @@ export interface ParserEngineInfo {
   FileTypes: string[]
   Available?: boolean
   UnavailableReason?: string
+  External?: boolean
 }
 
 /** 解析引擎配置（引擎相关存租户；docreader 地址由环境变量配置） */

@@ -2,7 +2,9 @@
 package provider
 
 import (
+	"context"
 	"fmt"
+	"sort"
 	"strings"
 	"sync"
 
@@ -103,6 +105,19 @@ type ProviderInfo struct {
 	ModelTypes   []types.ModelType          // 支持的模型类型
 	RequiresAuth bool                       // 是否需要 API key
 	ExtraFields  []ExtraFieldConfig         // 额外配置字段
+	External     bool                       `json:"external,omitempty"`
+	Permissions  *ProviderPermissions       `json:"permissions,omitempty"`
+}
+
+type ProviderPermissions struct {
+	AllowNetwork bool     `json:"allow_network"`
+	ReadPaths    []string `json:"read_paths,omitempty"`
+}
+
+type ProviderStatus struct {
+	Type    string `json:"type"`
+	Healthy bool   `json:"healthy"`
+	Error   string `json:"error,omitempty"`
 }
 
 // GetDefaultURL 获取指定模型类型的默认 URL
@@ -162,6 +177,63 @@ func Register(p Provider) {
 	registry[p.Info().Name] = p
 }
 
+func RegisterExternal(info ProviderInfo, validate func(*Config) error, health func(context.Context) error) error {
+	registryMu.Lock()
+	defer registryMu.Unlock()
+	if _, exists := registry[info.Name]; exists {
+		return fmt.Errorf("model provider %s already registered", info.Name)
+	}
+	info.External = true
+	registry[info.Name] = externalProvider{info: info, validate: validate, health: health}
+	return nil
+}
+
+func UnregisterExternal(name ProviderName) {
+	registryMu.Lock()
+	defer registryMu.Unlock()
+	if p, ok := registry[name]; ok && p.Info().External {
+		delete(registry, name)
+	}
+}
+
+type externalProvider struct {
+	info     ProviderInfo
+	validate func(*Config) error
+	health   func(context.Context) error
+}
+
+func ExternalStatuses(ctx context.Context) []ProviderStatus {
+	registryMu.RLock()
+	external := make([]externalProvider, 0)
+	for _, p := range registry {
+		if ep, ok := p.(externalProvider); ok {
+			external = append(external, ep)
+		}
+	}
+	registryMu.RUnlock()
+	statuses := make([]ProviderStatus, 0, len(external))
+	for _, p := range external {
+		status := ProviderStatus{Type: string(p.info.Name), Healthy: true}
+		if p.health != nil {
+			if err := p.health(ctx); err != nil {
+				status.Healthy = false
+				status.Error = err.Error()
+			}
+		}
+		statuses = append(statuses, status)
+	}
+	sort.Slice(statuses, func(i, j int) bool { return statuses[i].Type < statuses[j].Type })
+	return statuses
+}
+
+func (p externalProvider) Info() ProviderInfo { return p.info }
+func (p externalProvider) ValidateConfig(config *Config) error {
+	if p.validate == nil {
+		return nil
+	}
+	return p.validate(config)
+}
+
 // Get 通过名称从注册表中获取提供者
 func Get(name ProviderName) (Provider, bool) {
 	registryMu.RLock()
@@ -187,11 +259,21 @@ func List() []ProviderInfo {
 	defer registryMu.RUnlock()
 
 	result := make([]ProviderInfo, 0, len(registry))
+	seen := make(map[ProviderName]struct{}, len(registry))
 	for _, name := range AllProviders() {
 		if p, ok := registry[name]; ok {
 			result = append(result, p.Info())
+			seen[name] = struct{}{}
 		}
 	}
+	external := make([]ProviderInfo, 0)
+	for name, p := range registry {
+		if _, ok := seen[name]; !ok {
+			external = append(external, p.Info())
+		}
+	}
+	sort.Slice(external, func(i, j int) bool { return external[i].Name < external[j].Name })
+	result = append(result, external...)
 	return result
 }
 
@@ -201,8 +283,10 @@ func ListByModelType(modelType types.ModelType) []ProviderInfo {
 	defer registryMu.RUnlock()
 
 	result := make([]ProviderInfo, 0)
+	seen := make(map[ProviderName]struct{}, len(registry))
 	for _, name := range AllProviders() {
 		if p, ok := registry[name]; ok {
+			seen[name] = struct{}{}
 			info := p.Info()
 			for _, t := range info.ModelTypes {
 				if t == modelType {
@@ -212,6 +296,21 @@ func ListByModelType(modelType types.ModelType) []ProviderInfo {
 			}
 		}
 	}
+	external := make([]ProviderInfo, 0)
+	for name, p := range registry {
+		if _, builtin := seen[name]; builtin {
+			continue
+		}
+		info := p.Info()
+		for _, t := range info.ModelTypes {
+			if t == modelType {
+				external = append(external, info)
+				break
+			}
+		}
+	}
+	sort.Slice(external, func(i, j int) bool { return external[i].Name < external[j].Name })
+	result = append(result, external...)
 	return result
 }
 
@@ -290,11 +389,16 @@ func NewConfigFromModel(model *types.Model) (*Config, error) {
 		providerName = DetectProvider(model.Parameters.BaseURL)
 	}
 
+	extra := make(map[string]any, len(model.Parameters.ExtraConfig))
+	for key, value := range model.Parameters.ExtraConfig {
+		extra[key] = value
+	}
 	return &Config{
 		Provider:  providerName,
 		BaseURL:   model.Parameters.BaseURL,
 		APIKey:    model.Parameters.APIKey,
 		ModelName: model.Name,
 		ModelID:   model.ID,
+		Extra:     extra,
 	}, nil
 }

@@ -576,6 +576,18 @@ export interface ModelProviderOption {
     description: string;  // 描述
     defaultUrls: Record<string, string>;  // 按模型类型区分的默认 URL
     modelTypes: string[]; // 支持的模型类型
+    external?: boolean;
+    permissions?: { allow_network: boolean; read_paths?: string[] };
+}
+
+export interface ModelProviderStatus {
+    type: string;
+    healthy: boolean;
+    error?: string;
+}
+
+export function listModelProviderStatuses(): Promise<ModelProviderStatus[]> {
+    return get('/api/v1/models/providers/status').then((response: any) => response.data || []);
 }
 
 // 获取模型厂商列表

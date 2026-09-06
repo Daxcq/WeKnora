@@ -12,12 +12,13 @@ import (
 
 // webSearchProviderService implements interfaces.WebSearchProviderService
 type webSearchProviderService struct {
-	repo interfaces.WebSearchProviderRepository
+	repo     interfaces.WebSearchProviderRepository
+	registry *infra_web_search.Registry
 }
 
 // NewWebSearchProviderService creates a new web search provider service
-func NewWebSearchProviderService(repo interfaces.WebSearchProviderRepository) interfaces.WebSearchProviderService {
-	return &webSearchProviderService{repo: repo}
+func NewWebSearchProviderService(repo interfaces.WebSearchProviderRepository, registry *infra_web_search.Registry) interfaces.WebSearchProviderService {
+	return &webSearchProviderService{repo: repo, registry: registry}
 }
 
 // CreateProvider creates a new web search provider configuration.
@@ -26,10 +27,14 @@ func (s *webSearchProviderService) CreateProvider(ctx context.Context, provider 
 		return fmt.Errorf("tenant ID is required")
 	}
 
-	if !isValidProviderType(provider.Provider) {
+	info, ok := s.registry.ProviderType(string(provider.Provider))
+	if !ok {
 		return fmt.Errorf("invalid provider type: %s", provider.Provider)
 	}
 
+	if err := validateExternalProviderParameters(info, provider.Parameters); err != nil {
+		return err
+	}
 	if err := validateProviderParameters(provider.Provider, provider.Parameters); err != nil {
 		return err
 	}
@@ -51,8 +56,14 @@ func (s *webSearchProviderService) UpdateProvider(ctx context.Context, provider 
 	}
 
 	// Validate provider type if set
-	if provider.Provider != "" && !isValidProviderType(provider.Provider) {
-		return fmt.Errorf("invalid provider type: %s", provider.Provider)
+	if provider.Provider != "" {
+		info, ok := s.registry.ProviderType(string(provider.Provider))
+		if !ok {
+			return fmt.Errorf("invalid provider type: %s", provider.Provider)
+		}
+		if err := validateExternalProviderParameters(info, provider.Parameters); err != nil {
+			return err
+		}
 	}
 
 	if provider.IsDefault {
@@ -126,22 +137,6 @@ func (s *webSearchProviderService) DeleteProvider(ctx context.Context, tenantID 
 	return s.repo.Delete(ctx, tenantID, id)
 }
 
-// isValidProviderType checks if the given provider type is supported
-func isValidProviderType(provider types.WebSearchProviderType) bool {
-	switch provider {
-	case types.WebSearchProviderTypeBing,
-		types.WebSearchProviderTypeGoogle,
-		types.WebSearchProviderTypeDuckDuckGo,
-		types.WebSearchProviderTypeTavily,
-		types.WebSearchProviderTypeOllama,
-		types.WebSearchProviderTypeBaidu,
-		types.WebSearchProviderTypeSearxng:
-		return true
-	default:
-		return false
-	}
-}
-
 // validateProviderParameters validates required parameters for each provider type
 func validateProviderParameters(provider types.WebSearchProviderType, params types.WebSearchProviderParameters) error {
 	switch provider {
@@ -177,6 +172,22 @@ func validateProviderParameters(provider types.WebSearchProviderType, params typ
 	}
 	if err := validateOptionalProxyURL(params.ProxyURL); err != nil {
 		return err
+	}
+	return nil
+}
+
+func validateExternalProviderParameters(info types.WebSearchProviderTypeInfo, params types.WebSearchProviderParameters) error {
+	if !info.External {
+		return nil
+	}
+	if info.RequiresAPIKey && params.APIKey == "" {
+		return fmt.Errorf("API key is required for %s provider", info.Name)
+	}
+	if info.RequiresEngineID && params.EngineID == "" {
+		return fmt.Errorf("engine ID is required for %s provider", info.Name)
+	}
+	if info.RequiresBaseURL && params.BaseURL == "" {
+		return fmt.Errorf("base URL is required for %s provider", info.Name)
 	}
 	return nil
 }

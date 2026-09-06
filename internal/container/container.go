@@ -1356,7 +1356,7 @@ func registerIMAdapterFactories(imService *imPkg.Service) {
 // initConnectorRegistry creates and populates the connector registry with all available connectors.
 // Built-in registration errors fail container initialization. External plugin
 // errors are logged and skipped so one broken plugin cannot stop WeKnora.
-func initConnectorRegistry(cfg *config.Config, cleaner interfaces.ResourceCleaner) (*datasource.ConnectorRegistry, error) {
+func initConnectorRegistry(cfg *config.Config, cleaner interfaces.ResourceCleaner, settings interfaces.SystemSettingService, searchRegistry *infra_web_search.Registry) (*datasource.ConnectorRegistry, error) {
 	registry := datasource.NewConnectorRegistry()
 
 	var errs error
@@ -1383,8 +1383,13 @@ func initConnectorRegistry(cfg *config.Config, cleaner interfaces.ResourceCleane
 	if pluginDir != "" {
 		manager := datasourcePlugin.NewManager()
 		cleaner.RegisterWithName("ExternalDataSourcePlugins", manager.Close)
-		if err := manager.LoadDirectory(context.Background(), registry, pluginDir); err != nil {
+		if err := manager.LoadDirectory(context.Background(), registry, searchRegistry, pluginDir); err != nil {
 			logger.Warnf(context.Background(), "load external datasource plugins: %v", err)
+		}
+	}
+	for _, connectorType := range settings.GetStringList(context.Background(), datasource.DisabledPluginsSettingKey, "", nil) {
+		if err := registry.SetEnabled(connectorType, false); err != nil {
+			logger.Warnf(context.Background(), "restore disabled connector %s: %v", connectorType, err)
 		}
 	}
 

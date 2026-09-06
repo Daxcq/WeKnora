@@ -164,6 +164,11 @@
                   <div v-if="currentSection === 'mcp'" class="section">
                     <McpSettings />
                   </div>
+
+                  <!-- 外部插件运行状态 -->
+                  <div v-if="currentSection === 'plugins'" class="section">
+                    <PluginSettings />
+                  </div>
                 </template>
               </div>
             </div>
@@ -196,6 +201,7 @@ import StorageEngineSettings from './StorageEngineSettings.vue'
 import WeKnoraCloudSettings from './WeKnoraCloudSettings.vue'
 import TenantMembers from './TenantMembers.vue'
 import SystemSettings from '@/views/system/SystemSettings.vue'
+import PluginSettings from './PluginSettings.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -246,6 +252,7 @@ const SECTION_MIN_ROLE: Record<string, RoleKey> = {
   parser: 'admin',
   storage: 'admin',
   mcp: 'admin',
+  plugins: 'admin',
   system: 'viewer',
   userprofile: 'viewer',
   tenant: 'viewer',
@@ -281,6 +288,7 @@ const navItems = computed(() => {
     { key: 'parser', icon: 'file-search', label: t('settings.parserEngine') },
     { key: 'storage', icon: 'cloud', label: t('settings.storageEngine') },
     { key: 'mcp', icon: 'tools', label: t('settings.mcpService') },
+    { key: 'plugins', icon: 'plugin', label: t('settings.pluginManagement', '插件管理') },
     { key: 'system', icon: 'info-circle', label: t('settings.versionInfo') },
     { key: 'system-global', icon: 'server', label: t('settings.system') },
     { key: 'userprofile', icon: 'user', label: t('userProfile.title') },
@@ -323,7 +331,7 @@ const navGroups = computed<NavGroup[]>(() => {
     {
       key: 'data_extensions',
       label: t('settings.navGroups.dataExtensions'),
-      items: pickItems(['vectorstore', 'parser', 'storage', 'websearch', 'mcp']),
+      items: pickItems(['vectorstore', 'parser', 'storage', 'websearch', 'mcp', 'plugins']),
     },
     {
       key: 'platform',

@@ -47,6 +47,7 @@ type ParserEngineInfo struct {
 	FileTypes         []string
 	Available         bool
 	UnavailableReason string
+	External          bool
 }
 
 // --- Internal types used by chunking pipeline ---

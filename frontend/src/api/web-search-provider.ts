@@ -5,7 +5,7 @@ export interface WebSearchProviderEntity {
   id?: string
   tenant_id?: number
   name: string
-  provider: 'bing' | 'google' | 'duckduckgo' | 'tavily' | 'ollama' | 'baidu' | 'searxng'
+  provider: string
   description?: string
   parameters: {
     // api_key is never returned by the server in this shape; it lives behind
@@ -34,6 +34,17 @@ export interface WebSearchProviderTypeInfo {
   supports_proxy?: boolean
   description?: string
   docs_url?: string
+  external?: boolean
+  permissions?: {
+    allow_network: boolean
+    read_paths?: string[]
+  }
+}
+
+export interface WebSearchProviderStatus {
+  type: string
+  healthy: boolean
+  error?: string
 }
 
 // Create a new web search provider
@@ -69,6 +80,10 @@ export function listWebSearchProviderTypes(): Promise<WebSearchProviderTypeInfo[
     }
     return []
   })
+}
+
+export function listWebSearchProviderStatuses(): Promise<WebSearchProviderStatus[]> {
+  return get('/api/v1/web-search-providers/types/status').then((res: any) => res.data || [])
 }
 
 // ----------------------------------------------------------------------------

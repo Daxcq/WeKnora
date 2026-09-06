@@ -100,6 +100,9 @@ func (s *modelService) CreateModel(ctx context.Context, model *types.Model) erro
 
 	// Handle remote models (e.g., OpenAI, Azure)
 	if model.Source == types.ModelSourceRemote {
+		if err := validateExternalModel(model); err != nil {
+			return err
+		}
 		logger.Info(ctx, "Remote model detected, setting status to active")
 		model.Status = types.ModelStatusActive
 
@@ -240,6 +243,9 @@ func (s *modelService) UpdateModel(ctx context.Context, model *types.Model) erro
 		logger.Warnf(ctx, "Attempted to update builtin model: %s", model.ID)
 		return errors.New("builtin models cannot be updated")
 	}
+	if err := validateExternalModel(model); err != nil {
+		return err
+	}
 
 	// Update model in repository
 	err = s.repo.Update(ctx, model)
@@ -252,6 +258,21 @@ func (s *modelService) UpdateModel(ctx context.Context, model *types.Model) erro
 	}
 
 	logger.Infof(ctx, "Model updated successfully: %s", model.ID)
+	return nil
+}
+
+func validateExternalModel(model *types.Model) error {
+	registered, ok := provider.Get(provider.ProviderName(model.Parameters.Provider))
+	if !ok || !registered.Info().External {
+		return nil
+	}
+	config, err := provider.NewConfigFromModel(model)
+	if err != nil {
+		return err
+	}
+	if err := registered.ValidateConfig(config); err != nil {
+		return fmt.Errorf("validate external model provider: %w", err)
+	}
 	return nil
 }
 

@@ -137,6 +137,15 @@ type WebSearchProviderTypeInfo struct {
 	Description string `json:"description"`
 	// URL to the provider's official website or documentation for obtaining credentials
 	DocsURL string `json:"docs_url,omitempty"`
+	// External is true when this provider is loaded from a plugin manifest.
+	External bool `json:"external,omitempty"`
+	// Permissions are copied from the plugin manifest for administration UI.
+	Permissions *WebSearchProviderPermissions `json:"permissions,omitempty"`
+}
+
+type WebSearchProviderPermissions struct {
+	AllowNetwork bool     `json:"allow_network"`
+	ReadPaths    []string `json:"read_paths,omitempty"`
 }
 
 // GetWebSearchProviderTypes returns metadata for all supported provider types.

@@ -41,6 +41,17 @@ func TestValidateManifestRejectsInvalidExtensionTypes(t *testing.T) {
 	}
 }
 
+func TestValidateManifestRequiresModelTypes(t *testing.T) {
+	err := ValidateManifest(Manifest{
+		ID: "model", Name: "Model", Version: "1.0.0", ProtocolVersion: ProtocolVersion,
+		ExtensionTypes: []string{"model_provider"}, WeKnoraVersion: "*",
+		Runtime: Runtime{Type: "docker", Image: "test"},
+	})
+	if err == nil {
+		t.Fatal("expected model_types validation error")
+	}
+}
+
 type testConnector struct{}
 
 func (testConnector) Validate(context.Context, json.RawMessage) error { return nil }
@@ -61,6 +72,20 @@ type testParser struct{}
 
 func (testParser) Parse(context.Context, *ParseRequest) (*ParseResponse, error) {
 	return &ParseResponse{MarkdownContent: "# parsed"}, nil
+}
+
+type testSearchProvider struct{}
+
+func (testSearchProvider) Search(context.Context, json.RawMessage, string, int, bool) ([]SearchResult, error) {
+	return []SearchResult{{Title: "result", URL: "https://example.com"}}, nil
+}
+
+type testModelProvider struct{}
+
+func (testModelProvider) ValidateConfig(context.Context, ModelConfig) error { return nil }
+
+func (testModelProvider) Chat(context.Context, *ModelChatRequest) (*ModelChatResponse, error) {
+	return &ModelChatResponse{Content: "model result", FinishReason: "stop"}, nil
 }
 
 func TestGRPCJSONRoundTrip(t *testing.T) {
@@ -109,6 +134,54 @@ func TestGRPCParserRoundTrip(t *testing.T) {
 	response, err := NewPluginClient(conn).Parse(context.Background(), &ParseRequest{FileName: "a.md"})
 	if err != nil || response.MarkdownContent != "# parsed" {
 		t.Fatalf("unexpected parser response: %#v, %v", response, err)
+	}
+}
+
+func TestGRPCWebSearchRoundTrip(t *testing.T) {
+	listener := bufconn.Listen(1024 * 1024)
+	server := grpc.NewServer(grpc.ForceServerCodec(JSONCodec{}))
+	RegisterPluginServer(server, &connectorServer{
+		manifest: Manifest{ID: "search", Name: "Search", Version: "1.0.0", ProtocolVersion: ProtocolVersion, ExtensionTypes: []string{"web_search"}, WeKnoraVersion: "*", Runtime: Runtime{Type: "process", Command: "test"}},
+		search:   testSearchProvider{},
+	})
+	go func() { _ = server.Serve(listener) }()
+	defer server.Stop()
+
+	conn, err := grpc.DialContext(context.Background(), "bufnet", grpc.WithContextDialer(func(context.Context, string) (net.Conn, error) { return listener.Dial() }), grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithDefaultCallOptions(grpc.ForceCodec(JSONCodec{})))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+
+	response, err := NewPluginClient(conn).Search(context.Background(), &SearchRequest{Query: "test", MaxResults: 1})
+	if err != nil || len(response.Results) != 1 || response.Results[0].Title != "result" {
+		t.Fatalf("unexpected search response: %#v, %v", response, err)
+	}
+}
+
+func TestGRPCModelRoundTrip(t *testing.T) {
+	listener := bufconn.Listen(1024 * 1024)
+	server := grpc.NewServer(grpc.ForceServerCodec(JSONCodec{}))
+	RegisterPluginServer(server, &connectorServer{
+		manifest: Manifest{ID: "model", Name: "Model", Version: "1.0.0", ProtocolVersion: ProtocolVersion, ExtensionTypes: []string{"model_provider"}, ModelTypes: []string{"chat"}, WeKnoraVersion: "*", Runtime: Runtime{Type: "process", Command: "test"}},
+		model:    testModelProvider{},
+	})
+	go func() { _ = server.Serve(listener) }()
+	defer server.Stop()
+
+	conn, err := grpc.DialContext(context.Background(), "bufnet", grpc.WithContextDialer(func(context.Context, string) (net.Conn, error) { return listener.Dial() }), grpc.WithTransportCredentials(insecure.NewCredentials()), grpc.WithDefaultCallOptions(grpc.ForceCodec(JSONCodec{})))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer conn.Close()
+
+	response, err := NewPluginClient(conn).Chat(context.Background(), &ModelChatRequest{})
+	if err != nil || response.Content != "model result" {
+		t.Fatalf("unexpected model response: %#v, %v", response, err)
+	}
+	validation, err := NewPluginClient(conn).ValidateModelConfig(context.Background(), &ModelValidateRequest{})
+	if err != nil || validation.Error != "" {
+		t.Fatalf("unexpected validation response: %#v, %v", validation, err)
 	}
 }
 

@@ -635,6 +635,7 @@ func RegisterModelRoutes(
 	{
 		// 获取模型厂商列表 — Viewer+
 		models.GET("/providers", g.Viewer(), handler.ListModelProviders)
+		models.GET("/providers/status", g.Viewer(), handler.ListExternalModelProviderStatuses)
 		// 创建模型 — Admin+
 		models.POST("", g.Admin(), handler.CreateModel)
 		// 获取模型列表 — Viewer+
@@ -923,6 +924,7 @@ func RegisterWebSearchProviderRoutes(
 	{
 		// List available provider types (metadata for UI forms) — Viewer+
 		providers.GET("/types", g.Viewer(), h.ListProviderTypes)
+		providers.GET("/types/status", g.Viewer(), h.ListExternalProviderStatuses)
 		// Test with raw credentials (no persistence) — Admin+
 		providers.POST("/test", g.Admin(), h.TestProviderRaw)
 		// CRUD

@@ -17,6 +17,7 @@ type DataSourceHandler struct {
 	service   interfaces.DataSourceService
 	kbService interfaces.KnowledgeBaseService
 	registry  *datasource.ConnectorRegistry
+	settings  interfaces.SystemSettingService
 }
 
 // NewDataSourceHandler creates a new data source handler
@@ -24,11 +25,13 @@ func NewDataSourceHandler(
 	service interfaces.DataSourceService,
 	kbService interfaces.KnowledgeBaseService,
 	registry *datasource.ConnectorRegistry,
+	settings interfaces.SystemSettingService,
 ) *DataSourceHandler {
 	return &DataSourceHandler{
 		service:   service,
 		kbService: kbService,
 		registry:  registry,
+		settings:  settings,
 	}
 }
 
@@ -645,9 +648,23 @@ func (h *DataSourceHandler) SetConnectorEnabled(c *gin.Context) {
 		return
 	}
 	connectorType := c.Param("type")
+	previouslyEnabled := false
+	for _, status := range h.registry.Statuses(c.Request.Context()) {
+		if status.Type == connectorType {
+			previouslyEnabled = status.Enabled
+			break
+		}
+	}
 	if err := h.registry.SetEnabled(connectorType, *req.Enabled); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": err.Error()})
 		return
+	}
+	if h.settings != nil {
+		if _, err := h.settings.Update(c.Request.Context(), datasource.DisabledPluginsSettingKey, h.registry.DisabledTypes()); err != nil {
+			_ = h.registry.SetEnabled(connectorType, previouslyEnabled)
+			c.JSON(http.StatusInternalServerError, gin.H{"error": "failed to persist connector state"})
+			return
+		}
 	}
 	for _, status := range h.registry.Statuses(c.Request.Context()) {
 		if status.Type == connectorType {

@@ -1,6 +1,7 @@
 package docparser
 
 import (
+	"context"
 	"fmt"
 	"sync"
 
@@ -44,12 +45,19 @@ func ExternalParser(name string) interfaces.DocReader {
 	return parser.reader
 }
 
-func ExternalParserEngines() []types.ParserEngineInfo {
+func ExternalParserEngines(ctx context.Context) []types.ParserEngineInfo {
 	externalParsers.RLock()
 	defer externalParsers.RUnlock()
 	result := make([]types.ParserEngineInfo, 0, len(externalParsers.items))
 	for _, parser := range externalParsers.items {
-		result = append(result, parser.info)
+		info := parser.info
+		if checker, ok := parser.reader.(interface{ Health(context.Context) error }); ok {
+			if err := checker.Health(ctx); err != nil {
+				info.Available = false
+				info.UnavailableReason = err.Error()
+			}
+		}
+		result = append(result, info)
 	}
 	return result
 }

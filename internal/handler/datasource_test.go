@@ -21,9 +21,26 @@ type stubDataSourceService struct {
 	getDataSource func(ctx context.Context, id string) (*types.DataSource, error)
 }
 
+type stubPluginSettings struct {
+	interfaces.SystemSettingService
+	disabled []string
+	err      error
+}
+
+func (s *stubPluginSettings) Update(_ context.Context, key string, value any) (*types.SystemSetting, error) {
+	if key != datasource.DisabledPluginsSettingKey {
+		return nil, errors.New("unexpected setting key")
+	}
+	if s.err != nil {
+		return nil, s.err
+	}
+	s.disabled = append([]string(nil), value.([]string)...)
+	return &types.SystemSetting{Key: key}, nil
+}
+
 type handlerTestConnector struct{}
 
-func (handlerTestConnector) Type() string { return "local-files" }
+func (handlerTestConnector) Type() string                                            { return "local-files" }
 func (handlerTestConnector) Validate(context.Context, *types.DataSourceConfig) error { return nil }
 func (handlerTestConnector) ListResources(context.Context, *types.DataSourceConfig, string) ([]types.Resource, error) {
 	return nil, nil
@@ -103,7 +120,7 @@ func TestDataSource_GetSyncLogs_ValidLimitWithinBounds(t *testing.T) {
 			return &types.KnowledgeBase{ID: "kb1", TenantID: 1}, nil
 		},
 	}
-	h := NewDataSourceHandler(dsSvc, kbSvc, datasource.NewConnectorRegistry())
+	h := NewDataSourceHandler(dsSvc, kbSvc, datasource.NewConnectorRegistry(), nil)
 
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/datasource/ds1/logs?limit=50&offset=25", nil)
@@ -136,7 +153,7 @@ func TestDataSource_GetSyncLogs_LimitExceedingMaximum(t *testing.T) {
 			return &types.KnowledgeBase{ID: "kb1", TenantID: 1}, nil
 		},
 	}
-	h := NewDataSourceHandler(dsSvc, kbSvc, datasource.NewConnectorRegistry())
+	h := NewDataSourceHandler(dsSvc, kbSvc, datasource.NewConnectorRegistry(), nil)
 
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/datasource/ds1/logs?limit=999", nil)
@@ -176,7 +193,7 @@ func TestDataSource_GetSyncLogs_MissingLimitDefaultsCorrectly(t *testing.T) {
 			return &types.KnowledgeBase{ID: "kb1", TenantID: 1}, nil
 		},
 	}
-	h := NewDataSourceHandler(dsSvc, kbSvc, datasource.NewConnectorRegistry())
+	h := NewDataSourceHandler(dsSvc, kbSvc, datasource.NewConnectorRegistry(), nil)
 
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/datasource/ds1/logs", nil)
@@ -209,7 +226,7 @@ func TestDataSource_GetSyncLogs_NonNumericLimitRejected(t *testing.T) {
 			return &types.KnowledgeBase{ID: "kb1", TenantID: 1}, nil
 		},
 	}
-	h := NewDataSourceHandler(dsSvc, kbSvc, datasource.NewConnectorRegistry())
+	h := NewDataSourceHandler(dsSvc, kbSvc, datasource.NewConnectorRegistry(), nil)
 
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/datasource/ds1/logs?limit=abc", nil)
@@ -236,7 +253,7 @@ func TestDataSource_GetSyncLogs_ZeroLimitRejected(t *testing.T) {
 			return &types.KnowledgeBase{ID: "kb1", TenantID: 1}, nil
 		},
 	}
-	h := NewDataSourceHandler(dsSvc, kbSvc, datasource.NewConnectorRegistry())
+	h := NewDataSourceHandler(dsSvc, kbSvc, datasource.NewConnectorRegistry(), nil)
 
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/datasource/ds1/logs?limit=0", nil)
@@ -263,7 +280,7 @@ func TestDataSource_GetSyncLogs_NegativeLimitRejected(t *testing.T) {
 			return &types.KnowledgeBase{ID: "kb1", TenantID: 1}, nil
 		},
 	}
-	h := NewDataSourceHandler(dsSvc, kbSvc, datasource.NewConnectorRegistry())
+	h := NewDataSourceHandler(dsSvc, kbSvc, datasource.NewConnectorRegistry(), nil)
 
 	w := httptest.NewRecorder()
 	req := httptest.NewRequest(http.MethodGet, "/datasource/ds1/logs?limit=-5", nil)
@@ -281,7 +298,8 @@ func TestConnectorStatusEndpoints(t *testing.T) {
 	if err := registry.Register(handlerTestConnector{}); err != nil {
 		t.Fatal(err)
 	}
-	h := NewDataSourceHandler(nil, nil, registry)
+	settings := &stubPluginSettings{}
+	h := NewDataSourceHandler(nil, nil, registry, settings)
 	r := gin.New()
 	r.GET("/types/status", h.GetConnectorStatuses)
 	r.PUT("/types/:type", h.SetConnectorEnabled)
@@ -302,5 +320,30 @@ func TestConnectorStatusEndpoints(t *testing.T) {
 	}
 	if _, err := registry.Get("local-files"); !errors.Is(err, datasource.ErrConnectorDisabled) {
 		t.Fatalf("expected disabled connector, got %v", err)
+	}
+	if len(settings.disabled) != 1 || settings.disabled[0] != "local-files" {
+		t.Fatalf("unexpected persisted disabled connectors: %v", settings.disabled)
+	}
+}
+
+func TestSetConnectorEnabledRollsBackWhenPersistenceFails(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	registry := datasource.NewConnectorRegistry()
+	if err := registry.Register(handlerTestConnector{}); err != nil {
+		t.Fatal(err)
+	}
+	settings := &stubPluginSettings{err: errors.New("db unavailable")}
+	h := NewDataSourceHandler(nil, nil, registry, settings)
+	r := gin.New()
+	r.PUT("/types/:type", h.SetConnectorEnabled)
+	request := httptest.NewRequest(http.MethodPut, "/types/local-files", strings.NewReader(`{"enabled":false}`))
+	request.Header.Set("Content-Type", "application/json")
+	record := httptest.NewRecorder()
+	r.ServeHTTP(record, request)
+	if record.Code != http.StatusInternalServerError {
+		t.Fatalf("unexpected persistence failure status: %d body=%s", record.Code, record.Body.String())
+	}
+	if _, err := registry.Get("local-files"); err != nil {
+		t.Fatalf("connector state was not rolled back: %v", err)
 	}
 }
