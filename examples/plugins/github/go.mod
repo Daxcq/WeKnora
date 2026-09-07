@@ -1,10 +1,8 @@
-module example.com/weknora-plain-text-parser
+module example.com/weknora-github
 
 go 1.26.0
 
 require github.com/Tencent/WeKnora v0.6.5
-
-replace github.com/Tencent/WeKnora => github.com/Daxcq/WeKnora v0.6.7-0.20260906161307-32a3005063b7
 
 require (
 	golang.org/x/net v0.54.0 // indirect
@@ -14,3 +12,5 @@ require (
 	google.golang.org/grpc v1.81.0 // indirect
 	google.golang.org/protobuf v1.36.11 // indirect
 )
+
+replace github.com/Tencent/WeKnora => github.com/Daxcq/WeKnora v0.6.5

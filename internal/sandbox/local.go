@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"time"
 )
@@ -74,7 +75,7 @@ func (s *LocalSandbox) Execute(ctx context.Context, config *ExecuteConfig) (*Exe
 	defer cancel()
 
 	// Build command
-	args := append([]string{config.Script}, config.Args...)
+	args := commandArgs(interpreter, config.Script, config.Args)
 	cmd := exec.CommandContext(execCtx, interpreter, args...)
 
 	// Set working directory
@@ -172,7 +173,15 @@ func (s *LocalSandbox) getInterpreter(scriptPath string) string {
 	ext := strings.ToLower(filepath.Ext(scriptPath))
 	switch ext {
 	case ".py":
+		if runtime.GOOS == "windows" {
+			return "python"
+		}
 		return "python3"
+	case ".cmd", ".bat":
+		if runtime.GOOS == "windows" {
+			return "cmd.exe"
+		}
+		return "sh"
 	case ".sh", ".bash":
 		return "bash"
 	case ".js":
@@ -186,6 +195,13 @@ func (s *LocalSandbox) getInterpreter(scriptPath string) string {
 	default:
 		return "sh"
 	}
+}
+
+func commandArgs(interpreter, script string, args []string) []string {
+	if runtime.GOOS == "windows" && interpreter == "cmd.exe" {
+		return append([]string{"/d", "/c", script}, args...)
+	}
+	return append([]string{script}, args...)
 }
 
 // isAllowedCommand checks if a command is in the allowed list
@@ -211,9 +227,13 @@ func (s *LocalSandbox) isAllowedCommand(cmd string) bool {
 
 // buildEnvironment creates a safe environment for script execution
 func (s *LocalSandbox) buildEnvironment(extra map[string]string) []string {
+	pathValue := "/usr/local/bin:/usr/bin:/bin"
+	if runtime.GOOS == "windows" {
+		pathValue = os.Getenv("PATH")
+	}
 	// Start with minimal environment
 	env := []string{
-		"PATH=/usr/local/bin:/usr/bin:/bin",
+		"PATH=" + pathValue,
 		"HOME=/tmp",
 		"LANG=en_US.UTF-8",
 		"LC_ALL=en_US.UTF-8",

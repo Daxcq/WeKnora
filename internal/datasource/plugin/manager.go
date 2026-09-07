@@ -572,8 +572,18 @@ func (p *processWebSearchProvider) Search(ctx context.Context, query string, max
 func (c *ProcessConnector) Type() string { return c.manifest.ID }
 
 func (c *ProcessConnector) Health(ctx context.Context) error {
+	c.mu.Lock()
+	closed := c.conn == nil
+	processExited := c.cmd != nil && c.cmd.ProcessState != nil
+	c.mu.Unlock()
+	if closed || processExited {
+		return errors.New("plugin process is not running; restart WeKnora to reload it")
+	}
 	resp, err := c.client.Health(ctx, &pluginapi.HealthRequest{})
 	if err != nil {
+		if strings.Contains(err.Error(), "file already closed") || strings.Contains(err.Error(), "connection is closing") {
+			return errors.New("plugin process is not running; restart WeKnora to reload it")
+		}
 		return err
 	}
 	if resp.Status != "ok" {

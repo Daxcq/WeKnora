@@ -227,6 +227,30 @@ The test creates `a.md` and `c.md`, changes only `c.md`, and verifies that the
 incremental response contains only `c.md`. A separate test covers
 `IsDeleted=true` tombstones.
 
+The GitHub example uses the branch commit SHA and recursive Git tree as its
+cursor. Configure `settings.owner`, `settings.repository`, optional
+`settings.branch`/`settings.path`, and an optional `credentials.token`. Public
+repositories work without a token; private repositories require one. Its unit test uses
+a local HTTP server to change one blob between two commits and verifies that
+the incremental response contains only that file. A real acceptance run is:
+
+```powershell
+cd examples/plugins/github
+go test ./...
+$env:GITHUB_INTEGRATION = "1"
+go test -run TestPublicRepository
+docker build -t weknora-plugin-github:dev .
+```
+
+The same plugin is also available as an independent checkout at
+`D:\weknora-plugin-github`; it contains its own Git history and builds without
+the main repository.
+
+Install its manifest, create a GitHub data source, run a
+full sync, commit a change to one file, and run an incremental sync. The sync
+log should report one updated item. Deleting a tracked file should produce one
+deletion tombstone.
+
 For a UI end-to-end check, put `a.md` and `c.md` in the allowed host directory,
 run one full sync, change only `c.md`, and run an incremental sync. The app
 log should contain `incremental sync fetched 1 items` and the sync result
@@ -252,7 +276,8 @@ go test ./pkg/pluginapi -run TestDockerStdioRoundTrip
 ## Failure and deletion rules
 
 An external process crash fails the sync and leaves the previous knowledge and
-cursor intact. A connector reports a source deletion with `IsDeleted=true`.
+cursor intact. The runtime status reports `plugin process is not running`; restart
+WeKnora to create a fresh plugin process and gRPC channel. A connector reports a source deletion with `IsDeleted=true`.
 `sync_deletions=false` ignores that event. When it is enabled, the
 `deletion_policy` field controls the host-side action:
 

@@ -349,6 +349,7 @@ func TestClientQueryDatabaseAll(t *testing.T) {
 var _ = time.Now
 
 func TestDownloadFile_RejectsLoopbackURL(t *testing.T) {
+	t.Setenv("SSRF_WHITELIST", "")
 	secutils.ResetSSRFWhitelistForTest()
 	t.Cleanup(secutils.ResetSSRFWhitelistForTest)
 

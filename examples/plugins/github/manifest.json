@@ -1,0 +1,18 @@
+{
+  "id": "github",
+  "name": "GitHub",
+  "version": "0.1.0",
+  "protocol_version": 1,
+  "extension_types": ["datasource"],
+  "weknora_version": ">=0.6.0 <1.0.0",
+  "config": [
+    {"name": "settings.owner", "type": "string", "required": true, "description": "GitHub repository owner"},
+    {"name": "settings.repository", "type": "string", "required": true, "description": "GitHub repository name"},
+    {"name": "settings.branch", "type": "string", "required": false, "description": "Branch, default main"},
+    {"name": "settings.path", "type": "string", "required": false, "description": "Optional repository path prefix"},
+    {"name": "credentials.token", "type": "secret", "required": false, "secret": true, "description": "Optional for public repositories; use a fine-grained token with read-only repository contents access for private repositories or higher rate limits"}
+  ],
+  "permissions": {"allow_network": true},
+  "runtime": {"type": "docker", "image": "weknora-plugin-github:dev"},
+  "description": "Sync files from a GitHub repository with commit-tree based incremental updates."
+}

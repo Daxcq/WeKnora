@@ -16,11 +16,21 @@ func init() {
 	log.Println("INFO: Initializing DocReader client tests")
 }
 
-func TestReadURL(t *testing.T) {
-	client, err := NewClient("localhost:50051")
+func newTestClient(t *testing.T) *Client {
+	t.Helper()
+	addr := os.Getenv("DOCREADER_TEST_ADDR")
+	if addr == "" {
+		t.Skip("DocReader integration tests require DOCREADER_TEST_ADDR")
+	}
+	client, err := NewClient(addr)
 	if err != nil {
 		t.Fatalf("Failed to create client: %v", err)
 	}
+	return client
+}
+
+func TestReadURL(t *testing.T) {
+	client := newTestClient(t)
 	defer client.Close()
 	client.SetDebug(true)
 
@@ -47,10 +57,7 @@ func TestReadURL(t *testing.T) {
 }
 
 func TestReadFile(t *testing.T) {
-	client, err := NewClient("localhost:50051")
-	if err != nil {
-		t.Fatalf("Failed to create client: %v", err)
-	}
+	client := newTestClient(t)
 	defer client.Close()
 	client.SetDebug(true)
 

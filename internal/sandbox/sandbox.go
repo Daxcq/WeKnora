@@ -196,6 +196,8 @@ func defaultAllowedCommands() []string {
 		"python3",
 		"node",
 		"bash",
+		"cmd",
+		"cmd.exe",
 		"sh",
 		"cat",
 		"echo",

@@ -1,8 +1,9 @@
 FROM golang:1.26-bookworm AS build
 WORKDIR /src
-COPY go.mod ./
+ARG GOPROXY=https://proxy.golang.org,direct
+COPY go.mod go.sum ./
+RUN GOPROXY=$GOPROXY go mod download
 COPY . .
-RUN go mod tidy
 RUN CGO_ENABLED=0 go build -o /out/plain-text-parser .
 
 FROM scratch
