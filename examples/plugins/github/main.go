@@ -226,7 +226,7 @@ func (c githubConnector) fetchEntries(ctx context.Context, owner, repository, br
 	items := make([]pluginapi.FetchedItem, 0)
 	for _, entry := range entries {
 		if entry.Type == "deleted" {
-			items = append(items, pluginapi.FetchedItem{ExternalID: entry.Path, FileName: path.Base(entry.Path), IsDeleted: true})
+			items = append(items, pluginapi.FetchedItem{ExternalID: entry.Path, FileName: fetchedFileName(entry.Path), IsDeleted: true})
 			continue
 		}
 		if entry.Type != "blob" || !selected(entry.Path, prefix, resourceIDs) {
@@ -236,9 +236,17 @@ func (c githubConnector) fetchEntries(ctx context.Context, owner, repository, br
 		if err != nil {
 			return nil, err
 		}
-		items = append(items, pluginapi.FetchedItem{ExternalID: entry.Path, Title: strings.TrimSuffix(path.Base(entry.Path), path.Ext(entry.Path)), Content: content, ContentType: contentType(entry.Path), FileName: path.Base(entry.Path), URL: c.webURL(owner, repository, branch, entry.Path), UpdatedAt: time.Now().UTC(), Metadata: map[string]string{"github_sha": entry.SHA}})
+		items = append(items, pluginapi.FetchedItem{ExternalID: entry.Path, Title: strings.TrimSuffix(path.Base(entry.Path), path.Ext(entry.Path)), Content: content, ContentType: contentType(entry.Path), FileName: fetchedFileName(entry.Path), URL: c.webURL(owner, repository, branch, entry.Path), UpdatedAt: time.Now().UTC(), Metadata: map[string]string{"github_sha": entry.SHA}})
 	}
 	return items, nil
+}
+
+func fetchedFileName(name string) string {
+	name = path.Base(name)
+	if path.Ext(name) == "" {
+		return name + ".txt"
+	}
+	return name
 }
 
 func contentType(name string) string {

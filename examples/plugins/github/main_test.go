@@ -93,3 +93,9 @@ func TestPublicRepository(t *testing.T) {
 		t.Fatalf("unchanged repository returned %d files", len(second))
 	}
 }
+
+func TestFetchedFileName(t *testing.T) {
+	if got := fetchedFileName("docs/README"); got != "README.txt" {
+		t.Fatalf("got %q", got)
+	}
+}
