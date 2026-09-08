@@ -1,0 +1,15 @@
+version: 1
+student:
+  name: "陈煦达"
+  github_id: "Daxcq"
+topic:
+  id: "1"
+  title: "外部插件框架"
+result:
+  type: code
+  url: "https://github.com/Daxcq/WeKnora/tree/codex/plugin-framework"
+repository:
+  url: "https://github.com/Daxcq/WeKnora.git"
+  branch: "codex/plugin-framework"
+  commit: "68fb23e56aeaed11d97f10b07e7c805a650a35e9"
+  tag: "rhino-2026-final-1"
