@@ -21,17 +21,29 @@ for dir in "${MOUNT_DIRS[@]}"; do
 done
 
 # Match the mounted Docker socket's group so appuser can start external
-# Docker-runtime plugins without running the application as root.
-if [ -S /var/run/docker.sock ]; then
-    DOCKER_SOCKET_GID="$(stat -c '%g' /var/run/docker.sock)"
-    if ! getent group "$DOCKER_SOCKET_GID" >/dev/null 2>&1; then
-        groupadd -g "$DOCKER_SOCKET_GID" weknora-docker 2>/dev/null || true
+# Docker-runtime plugins without weakening the host socket permissions.
+grant_docker_sock_to_appuser() {
+    local sock="$1" gid grp
+    [ -S "$sock" ] || return 0
+    if gosu appuser sh -c "test -r \"$sock\" && test -w \"$sock\"" 2>/dev/null; then
+        return 0
     fi
-    DOCKER_GROUP="$(getent group "$DOCKER_SOCKET_GID" | cut -d: -f1)"
-    if [ -n "$DOCKER_GROUP" ]; then
-        usermod -aG "$DOCKER_GROUP" appuser
+    gid="$(stat -c '%g' "$sock" 2>/dev/null || true)"
+    if [ -z "$gid" ] || [ "$gid" = "0" ]; then
+        echo "weknora: Docker socket is not group-writable for appuser; Docker plugins may be unavailable" >&2
+        return 0
     fi
-fi
+    if ! getent group "$gid" >/dev/null 2>&1; then
+        groupadd -g "$gid" weknora-docker >/dev/null 2>&1 || true
+    fi
+    grp="$(getent group "$gid" | cut -d: -f1)"
+    [ -n "$grp" ] && usermod -aG "$grp" appuser >/dev/null 2>&1 || true
+}
+
+grant_docker_sock_to_appuser /var/run/docker.sock
+case "${DOCKER_HOST:-}" in
+    unix://*) grant_docker_sock_to_appuser "${DOCKER_HOST#unix://}" ;;
+esac
 
 # ─── Merge built-in skills into preloaded ───
 # Built-in skills are backed up at /app/skills/_builtin during image build.

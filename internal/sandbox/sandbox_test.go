@@ -20,8 +20,28 @@ func TestDefaultConfig(t *testing.T) {
 		t.Errorf("Expected default timeout %v, got %v", DefaultTimeout, config.DefaultTimeout)
 	}
 
-	if !config.FallbackEnabled {
-		t.Error("Expected fallback to be enabled by default")
+	if config.FallbackEnabled {
+		t.Error("Expected host-process fallback to be disabled by default")
+	}
+}
+
+func TestConfiguredModeRequiresDockerOptIn(t *testing.T) {
+	t.Setenv("WEKNORA_SANDBOX_MODE", "docker")
+	t.Setenv("WEKNORA_SANDBOX_DOCKER_ENABLED", "false")
+	if got := ConfiguredMode(); got != "disabled" {
+		t.Fatalf("ConfiguredMode() = %q, want disabled", got)
+	}
+	t.Setenv("WEKNORA_SANDBOX_DOCKER_ENABLED", "true")
+	if got := ConfiguredMode(); got != "docker" {
+		t.Fatalf("ConfiguredMode() = %q, want docker", got)
+	}
+	t.Setenv("WEKNORA_SANDBOX_MODE", "unknown")
+	if got := ConfiguredMode(); got != "disabled" {
+		t.Fatalf("ConfiguredMode() = %q, want disabled for unknown mode", got)
+	}
+	t.Setenv("WEKNORA_SANDBOX_MODE", "local")
+	if got := ConfiguredMode(); got != "disabled" {
+		t.Fatalf("ConfiguredMode() = %q, want disabled for local mode", got)
 	}
 }
 
@@ -128,6 +148,27 @@ echo "Args: $@"
 	t.Logf("Duration: %v", result.Duration)
 }
 
+func TestLocalSandboxAllowedPathBoundary(t *testing.T) {
+	root := t.TempDir()
+	allowed := filepath.Join(root, "allowed")
+	evil := filepath.Join(root, "allowed-evil")
+	if err := os.MkdirAll(allowed, 0755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(evil, 0755); err != nil {
+		t.Fatal(err)
+	}
+	script := filepath.Join(evil, "script.sh")
+	if err := os.WriteFile(script, []byte("echo unsafe"), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	sandbox := NewLocalSandbox(&Config{AllowedPaths: []string{allowed}})
+	if err := sandbox.validateScript(script); err == nil {
+		t.Fatal("expected sibling path to be rejected")
+	}
+}
+
 func TestLocalSandboxTimeout(t *testing.T) {
 	// Create a temporary script that sleeps
 	tmpDir, err := os.MkdirTemp("", "sandbox-test")
@@ -185,6 +226,16 @@ func TestNewManager(t *testing.T) {
 
 	if manager.GetType() != SandboxTypeLocal {
 		t.Errorf("Expected type local, got %s", manager.GetType())
+	}
+}
+
+func TestManagerRejectsNilExecutionConfig(t *testing.T) {
+	manager, err := NewManager(&Config{Type: SandboxTypeLocal})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := manager.Execute(context.Background(), nil); err != ErrInvalidScript {
+		t.Fatalf("Execute(nil) error = %v, want %v", err, ErrInvalidScript)
 	}
 }
 

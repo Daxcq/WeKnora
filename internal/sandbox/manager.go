@@ -62,13 +62,7 @@ func (m *DefaultManager) initializeSandbox(ctx context.Context) error {
 			return nil
 		}
 
-		// Fallback to local if enabled
-		if m.config.FallbackEnabled {
-			m.sandbox = NewLocalSandbox(m.config)
-			return nil
-		}
-
-		return fmt.Errorf("docker is not available and fallback is disabled")
+		return fmt.Errorf("docker is not available; refusing host-process fallback")
 
 	case SandboxTypeLocal:
 		m.sandbox = NewLocalSandbox(m.config)
@@ -82,6 +76,10 @@ func (m *DefaultManager) initializeSandbox(ctx context.Context) error {
 // Execute runs a script using the configured sandbox
 // It performs security validation before execution to prevent prompt injection attacks
 func (m *DefaultManager) Execute(ctx context.Context, config *ExecuteConfig) (*ExecuteResult, error) {
+	if config == nil {
+		return nil, ErrInvalidScript
+	}
+
 	m.mu.RLock()
 	sandbox := m.sandbox
 	m.mu.RUnlock()

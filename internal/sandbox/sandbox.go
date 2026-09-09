@@ -5,6 +5,8 @@ package sandbox
 import (
 	"context"
 	"errors"
+	"os"
+	"strings"
 	"time"
 )
 
@@ -180,13 +182,32 @@ type Config struct {
 func DefaultConfig() *Config {
 	return &Config{
 		Type:            SandboxTypeLocal,
-		FallbackEnabled: true,
+		FallbackEnabled: false,
 		DefaultTimeout:  DefaultTimeout,
 		DockerImage:     DefaultDockerImage,
 		AllowedCommands: defaultAllowedCommands(),
 		MaxMemory:       DefaultMemoryLimit,
 		MaxCPU:          DefaultCPULimit,
 	}
+}
+
+// ConfiguredMode returns the effective sandbox mode from deployment settings.
+// Docker is opt-in because access to docker.sock is equivalent to host root.
+func ConfiguredMode() string {
+	mode := strings.ToLower(strings.TrimSpace(os.Getenv("WEKNORA_SANDBOX_MODE")))
+	if mode == "" || (mode != string(SandboxTypeDocker) && mode != string(SandboxTypeLocal) && mode != string(SandboxTypeDisabled)) {
+		return string(SandboxTypeDisabled)
+	}
+	if mode == string(SandboxTypeLocal) {
+		return string(SandboxTypeDisabled)
+	}
+	if mode == string(SandboxTypeDocker) {
+		enabled := strings.ToLower(strings.TrimSpace(os.Getenv("WEKNORA_SANDBOX_DOCKER_ENABLED")))
+		if enabled != "1" && enabled != "true" && enabled != "yes" {
+			return "disabled"
+		}
+	}
+	return mode
 }
 
 // defaultAllowedCommands returns the default list of safe commands

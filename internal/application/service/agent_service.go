@@ -345,10 +345,7 @@ func (s *agentService) initializeSkillsManager(
 	var sandboxMgr sandbox.Manager
 	var err error
 
-	sandboxMode := os.Getenv("WEKNORA_SANDBOX_MODE")
-	if sandboxMode == "" {
-		sandboxMode = "disabled"
-	}
+	sandboxMode := sandbox.ConfiguredMode()
 	dockerImage := os.Getenv("WEKNORA_SANDBOX_DOCKER_IMAGE")
 	if dockerImage == "" {
 		dockerImage = sandbox.DefaultDockerImage
@@ -363,7 +360,7 @@ func (s *agentService) initializeSkillsManager(
 
 	switch sandboxMode {
 	case "docker":
-		sandboxMgr, err = sandbox.NewManagerFromType("docker", true, dockerImage) // Enable fallback to local
+		sandboxMgr, err = sandbox.NewManagerFromType("docker", false, dockerImage)
 		if err != nil {
 			logger.Warnf(ctx, "Failed to initialize Docker sandbox, falling back to disabled: %v", err)
 			sandboxMgr = sandbox.NewDisabledManager()

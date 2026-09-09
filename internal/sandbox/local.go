@@ -152,10 +152,17 @@ func (s *LocalSandbox) validateScript(scriptPath string) error {
 	// Validate against allowed paths if configured
 	if len(s.config.AllowedPaths) > 0 {
 		allowed := false
-		absPath, _ := filepath.Abs(scriptPath)
+		absPath, err := filepath.Abs(scriptPath)
+		if err != nil {
+			return fmt.Errorf("failed to resolve script path: %w", err)
+		}
 		for _, allowedPath := range s.config.AllowedPaths {
-			absAllowed, _ := filepath.Abs(allowedPath)
-			if strings.HasPrefix(absPath, absAllowed) {
+			absAllowed, err := filepath.Abs(allowedPath)
+			if err != nil {
+				continue
+			}
+			rel, err := filepath.Rel(absAllowed, absPath)
+			if err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
 				allowed = true
 				break
 			}

@@ -2,10 +2,10 @@ package handler
 
 import (
 	"net/http"
-	"os"
 
 	"github.com/Tencent/WeKnora/internal/errors"
 	"github.com/Tencent/WeKnora/internal/logger"
+	"github.com/Tencent/WeKnora/internal/sandbox"
 	"github.com/Tencent/WeKnora/internal/types/interfaces"
 	"github.com/gin-gonic/gin"
 )
@@ -59,7 +59,7 @@ func (h *SkillHandler) ListSkills(c *gin.Context) {
 	}
 
 	// skills_available: true only when sandbox is enabled (docker or local), so frontend can hide/disable Skills UI
-	sandboxMode := os.Getenv("WEKNORA_SANDBOX_MODE")
+	sandboxMode := sandbox.ConfiguredMode()
 	skillsAvailable := sandboxMode != "" && sandboxMode != "disabled"
 
 	logger.Infof(ctx, "skills_available: %v, sandboxMode: %s", skillsAvailable, sandboxMode)
