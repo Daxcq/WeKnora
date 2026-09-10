@@ -1,0 +1,84 @@
+name: Plugin Framework
+
+# Acceptance evidence for Rhino-bird 2026 topic 1 (external plugin framework):
+#   - host-side framework packages build, vet, and unit-test on Linux
+#   - example plugins are standalone modules that compile and test unmodified
+#   - the real Docker stdio gRPC round-trip runs against a locally built
+#     plugin image (acceptance: external plugin loads without touching the
+#     main repository source)
+
+on:
+  push:
+    branches: [codex/plugin-framework]
+    paths:
+      - 'internal/datasource/**'
+      - 'internal/infrastructure/docparser/**'
+      - 'pkg/pluginapi/**'
+      - 'examples/plugins/**'
+      - '.github/workflows/plugin-framework.yml'
+  pull_request:
+    paths:
+      - 'internal/datasource/**'
+      - 'internal/infrastructure/docparser/**'
+      - 'pkg/pluginapi/**'
+      - 'examples/plugins/**'
+      - '.github/workflows/plugin-framework.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  host:
+    name: host framework (linux)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+          cache-dependency-path: go.sum
+      - name: build
+        run: go build ./internal/datasource/plugin/... ./internal/infrastructure/docparser/... ./pkg/pluginapi/...
+      - name: vet
+        run: go vet ./internal/datasource/plugin/... ./internal/infrastructure/docparser/... ./pkg/pluginapi/...
+      - name: unit tests
+        run: go test -count=1 ./internal/datasource/plugin/... ./internal/infrastructure/docparser/... ./pkg/pluginapi/...
+
+  examples:
+    name: example plugin modules
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    strategy:
+      matrix:
+        plugin: [local-files, github, plain-text-parser, network-probe, template]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+          cache-dependency-path: examples/plugins/${{ matrix.plugin }}/go.sum
+      - name: test standalone module
+        working-directory: examples/plugins/${{ matrix.plugin }}
+        run: go test -count=1 ./...
+
+  docker-stdio-roundtrip:
+    name: docker runtime gRPC round-trip
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.26'
+          cache-dependency-path: go.sum
+      - name: build local-files plugin image
+        working-directory: examples/plugins/local-files
+        run: docker build -t weknora-plugin-local-files:ci .
+      - name: run TestDockerStdioRoundTrip against built image
+        env:
+          WEKNORA_TEST_PLUGIN_IMAGE: weknora-plugin-local-files:ci
+        run: go test -count=1 -run TestDockerStdioRoundTrip ./pkg/pluginapi/...
+      - name: network policy enforcement test
+        run: go test -count=1 -run TestNewDockerCommandEnforcesManifestNetworkPolicy ./internal/datasource/plugin/...
