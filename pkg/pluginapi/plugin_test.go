@@ -191,7 +191,13 @@ func TestDockerStdioRoundTrip(t *testing.T) {
 		t.Skip("WEKNORA_TEST_PLUGIN_IMAGE is not set")
 	}
 	root := t.TempDir()
-	if err := os.WriteFile(filepath.Join(root, "a.md"), []byte("a"), 0600); err != nil {
+	// The read-only bind mount is opened by the container's non-root user
+	// (USER 65532 in the plugin images), so the default 0700 temp dir and
+	// 0600 file are unreadable there on Linux hosts.
+	if err := os.Chmod(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "a.md"), []byte("a"), 0644); err != nil {
 		t.Fatal(err)
 	}
 	cmd := exec.Command("docker", "run", "--rm", "-i", "--network", "none",
